@@ -1,7 +1,3 @@
-import os
-import sys
-import threading
-import time
 import random
 from collections import defaultdict
 import math
@@ -13,15 +9,9 @@ import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 
-import gensim
-
 import pyjet.backend as J
-from pyjet.losses import bce_with_logits
-from pyjet.models import SLModel
 
 from tqdm import tqdm
-
-import models.utils as utils
 
 class Word2VecModel(nn.Module):
 
@@ -30,32 +20,115 @@ class Word2VecModel(nn.Module):
         self.embedding_size = embedding_size
         self.vocab_size = vocab_size
 
-        self._emb = nn.Embedding(self.vocab_size, self.embedding_size)
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size)
+        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
+        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
 
-    def forward(self, x):
+    @staticmethod
+    def token2tensor(tokens):
+        J.LongTensor([token.index for token in tokens]).view(*tokens.shape)
+
+    def forward(self, input_tokens, ctx_tokens, neg_tokens):
+        word_embs = self._encoder(self.token2tensor(input_tokens))  # B x 1 x E
+        ctx_embs = self._decoder(self.token2tensor(ctx_tokens))  # B x 1 x E
+        neg_embs = self._decoder(self.token2tensor(neg_tokens))  # B x N x E
+
+        pos_out = torch.bmm(word_embs, ctx_embs.transpose(1, 2))  # B x 1 x 1
+        neg_out = torch.bmm(word_embs, neg_embs.transpose(1, 2))  # B x 1 x N
+
+        return pos_out, neg_out
+
+    @staticmethod
+    def loss(true_logits, sampled_logits):
+
+        # cross-entropy(logits, labels)
+        true_xent = F.binary_cross_entropy_with_logits(true_logits, J.ones(*true_logits.size()).long(),
+                                                       size_average=False)
+        sampled_xent = F.binary_cross_entropy_with_logits(sampled_logits, J.zeros(*sampled_logits.size()).long(),
+                                                       size_average=False)
+
+        # NCE-loss is the sum of the true and noise (sampled words)
+        # contributions, averaged over the batch.
+        return (true_xent + sampled_xent) / (len(true_xent) + len(sampled_xent))
+
+    @staticmethod
+    def predict(logits):
+        return F.sigmoid(logits)
 
 
+class Token(object):
+    """
+    Class for storing token level information
+    """
+
+    def __init__(self, index, text, frequency=0):
+        self.index = index
+        self.text = text
+        self.frequency = frequency
+
+    def __hash__(self):
+        return hash(self.index)
+
+    def __eq__(self, other):
+        return self.index == other.index
 
 
 class Word2Vec(object):
+    """
+    Class for training, using and evaluating neural networks described in https://code.google.com/p/word2vec/
 
-    def __init__(self, sentences, embedding_size=200, learning_rate=0.2, num_neg_samples=100, batch_size=16,
-                 concurrent_steps=12, window_size=5, min_count=0, subsample=1e-3, seed=None):
-        # super(Word2Vec, self).__init__()
+    If you're finished training a model (=no more updates, only querying)
+    then switch to the :mod:`gensim.models.KeyedVectors` instance in wv
+
+    The model can be stored/loaded via its `save()` and `load()` methods, or stored/loaded in a format
+    compatible with the original word2vec implementation via `wv.save_word2vec_format()` and `KeyedVectors.load_word2vec_format()`.
+
+    """
+    # TODO: Implement the annealing of the learning rate
+    def __init__(self, sentences, embedding_size=200, learning_rate=0.25, min_learning_rate=0.0001, num_neg_samples=5,
+                 batch_size=16, epochs=5, window_size=5, dynamic_window=True, min_count=0, subsample=1e-3, seed=None):
+        """
+        Initialize the model from an iterable of `sentences`. Each sentence is a
+        list of words (unicode strings) that will be used for training.
+
+        The `sentences` iterable can be simply a list, but for larger corpora,
+        consider an iterable that streams the sentences directly from disk/network.
+
+        :param sentences: an iterable of `sentences` where each `sentence` is a list of tokens (usually words)
+        :param embedding_size: the dimensionality of the feature vectors.
+        :param learning_rate: the initial learning rate (will linearly drop to `min_learning_rate` as training progresses)
+        :param min_learning_rate: the minimum possible learning rate
+        :param num_neg_samples: if > 0, negative sampling will be used, the int for negative specifies how many
+            "noise words" should be drawn (usually between 5-20).
+            Default is 5. If set to 0, no negative samping is used.
+        :param batch_size: The number of sentences to pass through the model before updating the weights
+        :param window_size:
+        :param dynamic_window:
+        :param min_count: ignore all words with total frequency lower than this.
+        :param subsample:
+        :param seed:
+        """
+
         self.embedding_size = embedding_size
         self.learning_rate = learning_rate
-        self.batch_size = batch_size
+        self.min_learning_rate = min_learning_rate
         self.num_neg_samples = num_neg_samples
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.window_size = window_size
+        self.dynamic_window = dynamic_window
+        self.min_count = min_count
         self.subsample = subsample
 
         # Seed the random number generator
         random.seed(seed)
-        np.random.seed(seed)
+        np.random.seed(random.randint(0, 2**32))
 
         # Build the vocab
-        self._id2word, self._word2id, self.word_freqs = self.build_vocab(sentences)
-        self.vocab_size = len(self._id2word)
+        self.tokens, self.vocab, self.corpus_length = self.build_vocab(sentences, self.min_count)
+        self.vocab_size = len(self.tokens)
+        # Quick sanity check
+        assert all(token.index == i for i, token in enumerate(self.tokens))
+        assert len(self.tokens) == len(self.vocab) == self.vocab_size
 
         # Build the distribution for sampling for batches and negative sampling
         self.sampling_probs = self.build_sampling_distribution()
@@ -66,70 +139,144 @@ class Word2Vec(object):
 
         self._optimizer = optim.SGD(self._model.parameters(), lr=self.learning_rate)
 
-        self.global_step = 0
-
-    def nce_loss(self, true_logits, sampled_logits):
-
-        assert len(true_logits) + len(sampled_logits) == self.batch_size
-
-        # cross-entropy(logits, labels)
-        true_xent = bce_with_logits(true_logits, J.ones(*true_logits.size()).squeeze(1).long(), size_average=False)
-        sampled_xent = bce_with_logits(sampled_logits, J.zeros(*sampled_logits.size()).squeeze(1).long(),
-                                       size_average=False)
-
-        # NCE-loss is the sum of the true and noise (sampled words)
-        # contributions, averaged over the batch.
-        return (true_xent + sampled_xent) / self.batch_size
+        # Train the model
+        self.train(sentences)
 
     @staticmethod
-    def build_vocab(sentences):
+    def build_vocab(sentences, min_count):
         word_freqs = defaultdict(int)
+        corpus_length = 0
 
         # Do first pass through to collect frequencies
         print("Building vocabulary")
         for sentence in tqdm(sentences):
+            corpus_length += 1
             for word in sentence:
                 word_freqs[word] += 1
 
         # The vocabulary is mapped to id with most frequent being 1
-        id2word = list(sorted(word_freqs, key=lambda k: word_freqs[k], reverse=True))
-        word2id = {word: i for i, word in enumerate(id2word)}
-        return word2id, id2word, word_freqs
+        id2word = sorted((w for w in word_freqs if word_freqs[w] >= min_count), key=lambda k: word_freqs[k], reverse=True)
+        tokens = np.array([Token(index=i, text=w, frequency=word_freqs[w]) for i, w in enumerate(id2word)])
+        # Create a hashable set of the tokens
+        vocab = {token.text: token for token in tokens}
+        return tokens, vocab, corpus_length
 
     def build_sampling_distribution(self):
-        total_words = float(sum(self.word_freqs[w] for w in self.word_freqs))
+        total_words = float(sum(token.frequency for token in self.tokens))
 
-        word_z = [self.word_freqs[w] / total_words for w in self._id2word]
+        word_z = [token.frequency / total_words for token in self.tokens]
         # Sampling rate is based on distribution from original word2vec C
         # implementation. See
         # http://mccormickml.com/2017/01/11/word2vec-tutorial-part-2-negative-sampling/
         sampling_probs = np.empty(self.vocab_size)
-        for i, w in enumerate(self._id2word):
-            sampling_probs[i] = (math.sqrt(word_z[i] / float(self.subsample)) + 1) * float(self.subsample) / word_z[i]
+        for token in self.tokens:
+            if self.subsample != 0:
+                token.subsample_prob = (math.sqrt(word_z[token.index] / float(self.subsample)) + 1) * float(
+                    self.subsample) / word_z[token.index]
+            else:
+                sampling_probs[token.index] = 1.
+            # Just a sanity check
+            assert sampling_probs[token.index] <= 1.
         return sampling_probs
 
     def build_unigram_distribution(self):
         # Sampling rate is based on distribution from original word2vec C
         # implementation. See
         # http://mccormickml.com/2017/01/11/word2vec-tutorial-part-2-negative-sampling/
-        unigram_probs = np.array([self.word_freqs[w] ** (3/4) for w in self._id2word])
+        unigram_probs = np.array([token.frequency ** (3/4) for token in self.tokens])
         # Normalize the probabilities
-        prob_sum = float(sum(unigram_probs))
-        unigram_probs = unigram_probs / prob_sum
+        unigram_probs = unigram_probs / np.sum(unigram_probs)
         return unigram_probs
 
+    def sample_unigram_distribution(self, true_tokens):
+        true_token_indices = np.array([token.index for token in true_tokens])
+        # Make the true tokens unsampleable
+        true_unigram_probs = self.unigram_probs[true_token_indices]
+        self.unigram_probs[true_token_indices] = 0.
+        # Renormalize
+        masked_sum = self.unigram_probs.sum()
+        self.unigram_probs /= masked_sum
 
+        # Sample from the distribution without replacement
+        sampled_tokens = np.random.choice(self.tokens, size=self.num_neg_samples, replace=False, p=self.unigram_probs)
 
-    def train(self, sentences, epochs=5):
+        # Undo the masking of the distribution
+        self.unigram_probs *= masked_sum
+        self.unigram_probs[true_token_indices] = true_unigram_probs
 
-        for epoch in range(epochs):
-            for sentence in sentences:
+        return sampled_tokens
 
+    def generate_sg_batch(self, sentences):
+        token_pairs = []
+        sent_count = 0
+        for sentence in tqdm(sentences, total=self.corpus_length):
+            # Get the tokens of the words in the sentence and prune any words not in the vocabulary
+            sent_tokens = [self.vocab[w] for w in sentence if w in self.vocab]
+            # Prune the sentence based on subsampling
+            sent_tokens = [token for token in sent_tokens if np.random.random() < self.sampling_probs[token.index]]
 
-    def train_sg_pair(self, word, context):
-        pos_indicies = [self._word2id[context]]
-        # Now sample the negative samples
-        neg_indicies = [self.]
+            # Turn the sentence into batches for the model
+            for pos, token in enumerate(sent_tokens):
+                # Modifier to the window size
+                window_modifier = np.random.randint(self.window_size) if self.dynamic_window else 0
+                # now go over all words from the (reduced) window
+                start = max(0, pos - self.window_size + window_modifier)
+                end = pos + self.window_size + 1 - window_modifier
+                for pos2, ctx_token in enumerate(sent_tokens[start:end], start):
+                    # don't train on the `word` itself
+                    if pos2 != pos:
+                        token_pairs.append((token, ctx_token))
+            # step the sentence count
+            sent_count += 1
+
+            if sent_count % self.batch_size == 0:
+                # Construct the batch and yield
+                yield self.create_sg_batch(token_pairs), self.batch_size
+                # Reset the token pairs
+                token_pairs = []
+
+        # Sanity check
+        assert sent_count == self.corpus_length
+
+        # Yield again if we still have some samples left
+        if sent_count % self.batch_size != 0:
+            yield self.create_sg_batch(token_pairs), sent_count % self.batch_size
+
+    def create_sg_batch(self, token_pairs):
+        input_token_batch = np.empty((len(token_pairs), 1), dtype='O')
+        ctx_token_batch = np.empty((len(token_pairs), 1), dtype='O')
+        neg_token_batch = np.empty((len(token_pairs), self.num_neg_samples), dtype='O')
+        for i, token, ctx_token in enumerate(token_pairs):
+            # Insert the token and context
+            input_token_batch[i] = token
+            ctx_token_batch[i] = ctx_token
+            # Now sample the negative contrastive tokens
+            neg_token_batch[i] = self.sample_unigram_distribution(true_tokens=[token, ctx_token])
+        return input_token_batch, ctx_token_batch, neg_token_batch
+
+    def train(self, sentences):
+        num_sentences = self.corpus_length * self.epochs
+        lr_step = (1 / num_sentences) * (self.learning_rate - self.min_learning_rate)
+        # Run each epoch
+        num_updates = 0
+        for epoch in range(self.epochs):
+            print("Epoch {}/{}".format(epoch+1, self.epochs))
+            # Run through each batch
+            for (input_token_batch, ctx_token_batch, neg_token_batch), n_batch_sents in self.generate_sg_batch(
+                    sentences):
+                # Zero out the current gradient
+                self._optimizer.zero_grad()
+                # Do the forward pass
+                true_logits, neg_logits = self._model(input_token_batch, ctx_token_batch, neg_token_batch)
+                loss = self._model.loss(true_logits, neg_logits)
+                # Do the backward pass
+                loss.backward()
+                # Step the optimizer
+                self._optimizer.step()
+                num_updates += 1
+
+                # Anneal the learning rate
+                self.learning_rate -= n_batch_sents * lr_step
 
 
 
