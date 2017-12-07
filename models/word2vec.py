@@ -14,20 +14,50 @@ import pyjet.backend as J
 from tqdm import tqdm
 
 class Word2VecModel(nn.Module):
+    """
+    Class that contains the actual trainable pytorch module and houses the parameters of the model. This model
+    should not be trained directly, but rather through the `Word2Vec` class below.
+    """
 
     def __init__(self, vocab_size, embedding_size):
+        """
+        Initializes a pytorch word2vec module.
+
+        :param vocab_size: The size of the vocabulary of the corpus
+        :param embedding_size: The dimension of the embeddings
+        """
         super(Word2VecModel, self).__init__()
         self.embedding_size = embedding_size
         self.vocab_size = vocab_size
 
+        # Use sparse for more memory efficient computations
+        # Note that only SGD will work with sparse embedding layers on a GPU
         self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
         self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
 
     @staticmethod
     def token2tensor(tokens):
+        """Helper to cast a numpy array of tokens to a torch LongTensor"""
         J.LongTensor([token.index for token in tokens]).view(*tokens.shape)
 
     def forward(self, input_tokens, ctx_tokens, neg_tokens):
+        """
+        Computes the forward pass of the pytorch module
+
+        :param input_tokens: The tokens that are input into the model whose embeddings are being trained. Should be of
+            shape (Batch Size x 1). This needs to have a shape parameter.
+        :param ctx_tokens: The tokens that are in the context of the input tokens. These are the true labels (trying to
+            predict 1 for these). Should be of shape (Batch Size x 1). This needs to have a shape parameter.
+        :param neg_tokens: The sampled noise tokens. These are the false labels (trying to predict 0 for these). Should
+            be of shape (Batch Size x Num Neg Samples). This needs to have a shape parameter.
+        :return: The logits for the true and false predictions
+        """
+        # Quick sanity checks
+        assert input_tokens.shape[1:] == (1,)
+        assert ctx_tokens.shape[1:] == (1,)
+        assert neg_tokens.ndim == 2
+        assert neg_tokens.shape[0] == ctx_tokens.shape[0] == input_tokens.shape[0]
+
         word_embs = self._encoder(self.token2tensor(input_tokens))  # B x 1 x E
         ctx_embs = self._decoder(self.token2tensor(ctx_tokens))  # B x 1 x E
         neg_embs = self._decoder(self.token2tensor(neg_tokens))  # B x N x E
@@ -39,6 +69,13 @@ class Word2VecModel(nn.Module):
 
     @staticmethod
     def loss(true_logits, sampled_logits):
+        """
+        Computes the loss of the prediction of the network wrt some batch.
+
+        :param true_logits: The predicted logits for the true labels
+        :param sampled_logits: The predicted logits for the false labels
+        :return: The loss of the predictions.
+        """
 
         # cross-entropy(logits, labels)
         true_xent = F.binary_cross_entropy_with_logits(true_logits, J.ones(*true_logits.size()).long(),
@@ -52,6 +89,7 @@ class Word2VecModel(nn.Module):
 
     @staticmethod
     def predict(logits):
+        """Defines how an actual prediction is computed using the logits."""
         return F.sigmoid(logits)
 
 
@@ -61,6 +99,13 @@ class Token(object):
     """
 
     def __init__(self, index, text, frequency=0):
+        """
+        Initialize the token for use.
+
+        :param index: The id of the token
+        :param text: The text of the token
+        :param frequency: The total number of occurences of the token in the corpus
+        """
         self.index = index
         self.text = text
         self.frequency = frequency
@@ -101,11 +146,14 @@ class Word2Vec(object):
             "noise words" should be drawn (usually between 5-20).
             Default is 5. If set to 0, no negative samping is used.
         :param batch_size: The number of sentences to pass through the model before updating the weights
-        :param window_size:
-        :param dynamic_window:
+        :param window_size: Window size around a token that defines the context of a token. `window_size` tokens to the
+            the left and to the right are included in the context.
+        :param dynamic_window: Whether or not to randomly decrease the window size when training like in the original
+            word2vec implementation
         :param min_count: ignore all words with total frequency lower than this.
-        :param subsample:
-        :param seed:
+        :param subsample: Subsampling factor to reduce sampling of frequent words in batches
+        :param seed: The seed for the random generator. Note that this is only for the python and numpy random
+            generators and does not seed pytorch. As of now, pytorch is not being seeded
         """
 
         self.embedding_size = embedding_size
@@ -246,7 +294,7 @@ class Word2Vec(object):
         input_token_batch = np.empty((len(token_pairs), 1), dtype='O')
         ctx_token_batch = np.empty((len(token_pairs), 1), dtype='O')
         neg_token_batch = np.empty((len(token_pairs), self.num_neg_samples), dtype='O')
-        for i, token, ctx_token in enumerate(token_pairs):
+        for i, (token, ctx_token) in enumerate(token_pairs):
             # Insert the token and context
             input_token_batch[i] = token
             ctx_token_batch[i] = ctx_token
