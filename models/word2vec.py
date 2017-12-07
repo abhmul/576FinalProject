@@ -13,9 +13,12 @@ import pyjet.backend as J
 
 from tqdm import tqdm
 
+
 class Word2VecModel(nn.Module):
     """
-    Class that contains the actual trainable pytorch module and houses the parameters of the model. This model
+    Class that represents the vanilla word2vec module. We'll swap this out with our experimental modules.
+
+    this contains the actual trainable pytorch module and houses the parameters of the model. This model
     should not be trained directly, but rather through the `Word2Vec` class below.
     """
 
