@@ -96,9 +96,6 @@ class Word2Vec(object):
         self.model_func = None
         self._model = None
 
-        # Optimizer
-        self._optimizer = optim.SGD(self._model.parameters(), lr=self.learning_rate)
-
         # Seed the random number generator
         random.seed(seed)
         np.random.seed(random.randint(0, 2**32))
@@ -126,6 +123,9 @@ class Word2Vec(object):
         self._model_func = model_func
         self._model = self.build_model()
 
+        # Optimizer
+        self._optimizer = self.build_optimizer()
+
         # Train the model
         self.train(sentences)
 
@@ -149,6 +149,9 @@ class Word2Vec(object):
         # Create a hashable set of the tokens
         vocab = {token.text: token for token in tokens}
         return tokens, vocab, corpus_length
+
+    def build_optimizer(self):
+        return optim.SGD(self._model.parameters(), lr=self.learning_rate)
 
     def build_sampling_distribution(self):
         total_words = float(sum(token.frequency for token in self.tokens))
@@ -352,7 +355,7 @@ class Word2Vec(object):
             word2vec._model_func = attributes["model_func"]
             word2vec._model = word2vec.build_model()
             word2vec._model.load_state_dict(torch.load(fname + ".state_dict"))
-
+            word2vec._optimizer = word2vec.build_optimizer()
         # Load the vocabulary attributes from numpy
         if attributes["numpy_saved"]:
             vocab_arrays = np.load(fname + ".npz")
