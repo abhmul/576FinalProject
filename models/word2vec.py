@@ -131,7 +131,6 @@ class Word2Vec(object):
     compatible with the original word2vec implementation via `wv.save_word2vec_format()` and `KeyedVectors.load_word2vec_format()`.
 
     """
-    # TODO: Implement the annealing of the learning rate
     def __init__(self, sentences, embedding_size=200, learning_rate=0.25, min_learning_rate=0.0001, num_neg_samples=5,
                  batch_size=16, epochs=5, window_size=5, dynamic_window=True, min_count=0, subsample=1e-3, seed=None):
         """
@@ -266,6 +265,10 @@ class Word2Vec(object):
             # Prune the sentence based on subsampling
             sent_tokens = [token for token in sent_tokens if np.random.random() < self.sampling_probs[token.index]]
 
+            # If the sentence is only one word or less, just skip it
+            if len(sent_tokens) <= 1:
+                continue
+
             # Turn the sentence into batches for the model
             for pos, token in enumerate(sent_tokens):
                 # Modifier to the window size
@@ -277,6 +280,7 @@ class Word2Vec(object):
                     # don't train on the `word` itself
                     if pos2 != pos:
                         token_pairs.append((token, ctx_token))
+
             # step the sentence count
             sent_count += 1
 
@@ -327,8 +331,6 @@ class Word2Vec(object):
                 num_updates += 1
 
                 # Anneal the learning rate
-                self.learning_rate -= n_batch_sents * lr_step
-
-
-
-
+                self.learning_rate = max(self.min_learning_rate, self.learning_rate - n_batch_sents * lr_step)
+                for param_group in self._optimizer.param_groups:
+                    param_group['lr'] = self.learning_rate
