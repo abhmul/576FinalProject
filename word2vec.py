@@ -1,117 +1,16 @@
 import random
 from collections import defaultdict
 import math
+import pickle
 
 import numpy as np
 
 import torch
 import torch.optim as optim
-import torch.nn as nn
-import torch.nn.functional as F
 
 import pyjet.backend as J
 
 from tqdm import tqdm
-
-
-class Word2VecModel(nn.Module):
-    """
-    Class that represents the vanilla word2vec module. We'll swap this out with our experimental modules.
-
-    this contains the actual trainable pytorch module and houses the parameters of the model. This model
-    should not be trained directly, but rather through the `Word2Vec` class below.
-    """
-
-    def __init__(self, vocab_size, embedding_size):
-        """
-        Initializes a pytorch word2vec module.
-
-        :param vocab_size: The size of the vocabulary of the corpus
-        :param embedding_size: The dimension of the embeddings
-        """
-        super(Word2VecModel, self).__init__()
-        self.embedding_size = embedding_size
-        self.vocab_size = vocab_size
-
-        # Use sparse for more memory efficient computations
-        # Note that only SGD will work with sparse embedding layers on a GPU
-        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
-
-        self._embedding_norms = None
-
-    @staticmethod
-    def token2tensor(tokens):
-        """Helper to cast a numpy array of tokens to a torch LongTensor"""
-        J.LongTensor([token.index for token in tokens]).view(*np.array(tokens).shape)
-
-    def forward(self, input_tokens, ctx_tokens, neg_tokens):
-        """
-        Computes the forward pass of the pytorch module
-
-        :param input_tokens: The tokens that are input into the model whose embeddings are being trained. Should be of
-            shape (Batch Size x 1). This needs to have a shape parameter.
-        :param ctx_tokens: The tokens that are in the context of the input tokens. These are the true labels (trying to
-            predict 1 for these). Should be of shape (Batch Size x 1). This needs to have a shape parameter.
-        :param neg_tokens: The sampled noise tokens. These are the false labels (trying to predict 0 for these). Should
-            be of shape (Batch Size x Num Neg Samples). This needs to have a shape parameter.
-        :return: The logits for the true and false predictions
-        """
-        # Quick sanity checks
-        assert input_tokens.shape[1:] == (1,)
-        assert ctx_tokens.shape[1:] == (1,)
-        assert neg_tokens.ndim == 2
-        assert neg_tokens.shape[0] == ctx_tokens.shape[0] == input_tokens.shape[0]
-
-        word_embs = self._encoder(self.token2tensor(input_tokens))  # B x 1 x E
-        ctx_embs = self._decoder(self.token2tensor(ctx_tokens))  # B x 1 x E
-        neg_embs = self._decoder(self.token2tensor(neg_tokens))  # B x N x E
-
-        pos_out = torch.bmm(word_embs, ctx_embs.transpose(1, 2))  # B x 1 x 1
-        neg_out = torch.bmm(word_embs, neg_embs.transpose(1, 2))  # B x 1 x N
-
-        return pos_out, neg_out
-
-    @staticmethod
-    def loss(true_logits, sampled_logits):
-        """
-        Computes the loss of the prediction of the network wrt some batch.
-
-        :param true_logits: The predicted logits for the true labels
-        :param sampled_logits: The predicted logits for the false labels
-        :return: The loss of the predictions.
-        """
-
-        # cross-entropy(logits, labels)
-        true_xent = F.binary_cross_entropy_with_logits(true_logits, J.ones(*true_logits.size()).long(),
-                                                       size_average=False)
-        sampled_xent = F.binary_cross_entropy_with_logits(sampled_logits, J.zeros(*sampled_logits.size()).long(),
-                                                          size_average=False)
-
-        # NCE-loss is the sum of the true and noise (sampled words)
-        # contributions, averaged over the batch.
-        return (true_xent + sampled_xent) / (len(true_xent) + len(sampled_xent))
-
-    @staticmethod
-    def predict(logits):
-        """Defines how an actual prediction is computed using the logits."""
-        return F.sigmoid(logits)
-
-    def lookup(self, token):
-        return self._encoder(token.index)
-
-    def lookup_tokens(self, tokens):
-        return self._encoder(self.token2tensor(tokens))
-
-    @property
-    def embedding_norms(self):
-        if self._embedding_norms is None:
-            self._embedding_norms = torch.norm(self._encoder.weight.data, p=2, dim=1)
-        return self._embedding_norms
-
-    def similarities(self, tensor):
-        norm_tensor = tensor / torch.norm(tensor)
-        return torch.matmul(self._encoder.weight.data / self.embedding_norms, norm_tensor)
 
 
 class Token(object):
@@ -149,8 +48,8 @@ class Word2Vec(object):
     The model can be stored/loaded via its `save()` and `load()` methods.
 
     """
-    def __init__(self, sentences, embedding_size=200, learning_rate=0.25, min_learning_rate=0.0001, num_neg_samples=5,
-                 batch_size=16, epochs=5, window_size=5, dynamic_window=True, min_count=0, subsample=1e-3, seed=None):
+    def __init__(self, sentences=None, model_func=None, embedding_size=200, learning_rate=0.025, min_learning_rate=0.0001, num_neg_samples=5,
+                 batch_size=1, epochs=5, window_size=5, dynamic_window=True, min_count=0, subsample=1e-3, seed=None):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -187,9 +86,26 @@ class Word2Vec(object):
         self.min_count = min_count
         self.subsample = subsample
 
+        # Uninitialized variables
+        self.tokens = None
+        self.vocab = None
+        self.corpus_length = None
+        self.vocab_size = None
+        self.sampling_probs = None
+        self.unigram_probs = None
+        self.model_func = None
+        self._model = None
+
+        # Optimizer
+        self._optimizer = optim.SGD(self._model.parameters(), lr=self.learning_rate)
+
         # Seed the random number generator
         random.seed(seed)
         np.random.seed(random.randint(0, 2**32))
+
+        # If there are no sentences provided, the model is uninitialized
+        if sentences is None:
+            return
 
         # Build the vocab
         self.tokens, self.vocab, self.corpus_length = self.build_vocab(sentences, self.min_count)
@@ -202,10 +118,13 @@ class Word2Vec(object):
         self.sampling_probs = self.build_sampling_distribution()
         self.unigram_probs = self.build_unigram_distribution()
 
-        # Build the actual model
-        self._model = Word2VecModel(self.vocab_size, self.embedding_size)
+        # If no model is provided, don't train the word2vec
+        if model_func is None:
+            return
 
-        self._optimizer = optim.SGD(self._model.parameters(), lr=self.learning_rate)
+        # Build the actual model
+        self._model_func = model_func
+        self._model = self.build_model()
 
         # Train the model
         self.train(sentences)
@@ -224,6 +143,8 @@ class Word2Vec(object):
 
         # The vocabulary is mapped to id with most frequent being 1
         id2word = sorted((w for w in word_freqs if word_freqs[w] >= min_count), key=lambda k: word_freqs[k], reverse=True)
+        print(id2word[:100])
+        print(id2word[-100:])
         tokens = np.array([Token(index=i, text=w, frequency=word_freqs[w]) for i, w in enumerate(id2word)])
         # Create a hashable set of the tokens
         vocab = {token.text: token for token in tokens}
@@ -239,12 +160,13 @@ class Word2Vec(object):
         sampling_probs = np.empty(self.vocab_size)
         for token in self.tokens:
             if self.subsample != 0:
-                token.subsample_prob = (math.sqrt(word_z[token.index] / float(self.subsample)) + 1) * float(
+                sampling_probs[token.index] = (math.sqrt(word_z[token.index] / float(self.subsample)) + 1) * float(
                     self.subsample) / word_z[token.index]
             else:
                 sampling_probs[token.index] = 1.
             # Just a sanity check
-            assert sampling_probs[token.index] <= 1.
+            assert 0 < sampling_probs[token.index], sampling_probs[token.index]
+        # print(sampling_probs)
         return sampling_probs
 
     def build_unigram_distribution(self):
@@ -256,28 +178,13 @@ class Word2Vec(object):
         unigram_probs = unigram_probs / np.sum(unigram_probs)
         return unigram_probs
 
-    def sample_unigram_distribution(self, true_tokens):
-        true_token_indices = np.array([token.index for token in true_tokens])
-        # Make the true tokens unsampleable
-        true_unigram_probs = self.unigram_probs[true_token_indices]
-        self.unigram_probs[true_token_indices] = 0.
-        # Renormalize
-        masked_sum = self.unigram_probs.sum()
-        self.unigram_probs /= masked_sum
-
-        # Sample from the distribution without replacement
-        sampled_tokens = np.random.choice(self.tokens, size=self.num_neg_samples, replace=False, p=self.unigram_probs)
-
-        # Undo the masking of the distribution
-        self.unigram_probs *= masked_sum
-        self.unigram_probs[true_token_indices] = true_unigram_probs
-
-        return sampled_tokens
+    def build_model(self):
+        return self._model_func(self.vocab_size, self.embedding_size)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
         sent_count = 0
-        for sentence in tqdm(sentences, total=self.corpus_length):
+        for sentence in sentences:
             # Get the tokens of the words in the sentence and prune any words not in the vocabulary
             sent_tokens = [self.vocab[w] for w in sentence if w in self.vocab]
             # Prune the sentence based on subsampling
@@ -302,29 +209,30 @@ class Word2Vec(object):
             # step the sentence count
             sent_count += 1
 
+            # print(sent_count)
+
             if sent_count % self.batch_size == 0:
+                # print(len(token_pairs))
                 # Construct the batch and yield
                 yield self.create_sg_batch(token_pairs), self.batch_size
                 # Reset the token pairs
                 token_pairs = []
 
         # Sanity check
-        assert sent_count == self.corpus_length
+        # assert sent_count == self.corpus_length
 
         # Yield again if we still have some samples left
         if len(token_pairs) != 0:
             yield self.create_sg_batch(token_pairs), sent_count % self.batch_size
 
     def create_sg_batch(self, token_pairs):
-        input_token_batch = np.empty((len(token_pairs), 1), dtype='O')
-        ctx_token_batch = np.empty((len(token_pairs), 1), dtype='O')
-        neg_token_batch = np.empty((len(token_pairs), self.num_neg_samples), dtype='O')
-        for i, (token, ctx_token) in enumerate(token_pairs):
-            # Insert the token and context
-            input_token_batch[i] = token
-            ctx_token_batch[i] = ctx_token
-            # Now sample the negative contrastive tokens
-            neg_token_batch[i] = self.sample_unigram_distribution(true_tokens=[token, ctx_token])
+        # input_token_batch = np.empty((len(token_pairs), 1), dtype='O')
+        # ctx_token_batch = np.empty((len(token_pairs), 1), dtype='O')
+        input_token_batch, ctx_token_batch = zip(*token_pairs)
+        input_token_batch = np.array(input_token_batch).reshape(len(input_token_batch), 1)
+        ctx_token_batch = np.array(ctx_token_batch).reshape(len(ctx_token_batch), 1)
+        # Now sample the negative contrastive tokens
+        neg_token_batch = np.random.choice(self.tokens, size=(len(token_pairs), self.num_neg_samples), p=self.unigram_probs)
         return input_token_batch, ctx_token_batch, neg_token_batch
 
     def train(self, sentences):
@@ -334,9 +242,12 @@ class Word2Vec(object):
         num_updates = 0
         for epoch in range(self.epochs):
             print("Epoch {}/{}".format(epoch+1, self.epochs))
+            epoch_losses = []
             # Run through each batch
+            progbar_sentences = tqdm(sentences, total=self.corpus_length)
             for (input_token_batch, ctx_token_batch, neg_token_batch), n_batch_sents in self.generate_sg_batch(
-                    sentences):
+                    progbar_sentences):
+                # print("running train model iteration")
                 # Zero out the current gradient
                 self._optimizer.zero_grad()
                 # Do the forward pass
@@ -344,14 +255,20 @@ class Word2Vec(object):
                 loss = self._model.loss(true_logits, neg_logits)
                 # Do the backward pass
                 loss.backward()
+                epoch_losses.append(loss.data[0])
+                progbar_sentences.set_postfix({"loss": np.average(epoch_losses)})
                 # Step the optimizer
                 self._optimizer.step()
                 num_updates += 1
 
                 # Anneal the learning rate
                 self.learning_rate = max(self.min_learning_rate, self.learning_rate - n_batch_sents * lr_step)
+                # print(self.learning_rate)
                 for param_group in self._optimizer.param_groups:
                     param_group['lr'] = self.learning_rate
+
+            # Log the epoch's loss
+            print(np.average(epoch_losses))
 
     def most_similar(self, positive=tuple(), negative=tuple(), topn=10, restrict_vocab=None, indexer=None):
         """
@@ -404,3 +321,46 @@ class Word2Vec(object):
         # Get the topk
         scores, indices = torch.topk(similarities, k=topn)
         return [(self.tokens[idx], score) for idx, score in zip(indices, scores)]
+
+    def save(self, fname):
+        if self._model_func is not None:
+            torch.save(self._model.state_dict(), fname + ".state_dict")
+        # Save the numpy arrays if their there
+        if self.tokens is not None:
+            np.savez(fname + ".npz", tokens=self.tokens, sampling_probs=self.sampling_probs,
+                     unigram_probs=self.unigram_probs)
+        # Pickle the params we need to reconstruct the model
+        params = {"embedding_size": self.embedding_size, "learning_rate": self.learning_rate,
+                  "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
+                  "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
+                  "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
+                  "seed": random.randint(0, 2 ** 32)}
+        attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
+                      "model_func": self._model_func, "numpy_saved": self.tokens is not None}
+        with open(fname + ".pkl", 'wb') as save_file:
+            pickle.dump(save_file, (params, attributes))
+
+    @staticmethod
+    def load(fname):
+        with open(fname + ".pkl", 'rb') as load_file:
+            params, attributes = pickle.load(load_file)
+        # Create the Word2Vec wrapper
+        word2vec = Word2Vec(**params)
+
+        # Load the model if we have one
+        if attributes["model_func"] is not None:
+            word2vec._model_func = attributes["model_func"]
+            word2vec._model = word2vec.build_model()
+            word2vec._model.load_state_dict(torch.load(fname + ".state_dict"))
+
+        # Load the vocabulary attributes from numpy
+        if attributes["numpy_saved"]:
+            vocab_arrays = np.load(fname + ".npz")
+            word2vec.tokens = vocab_arrays["tokens"]
+            word2vec.sampling_probs = vocab_arrays["sampling_probs"]
+            word2vec.unigram_probs = vocab_arrays["unigram_probs"]
+
+        return word2vec
+
+
+
