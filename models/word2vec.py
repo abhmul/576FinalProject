@@ -86,7 +86,7 @@ class Word2VecModel(nn.Module):
         true_xent = F.binary_cross_entropy_with_logits(true_logits, J.ones(*true_logits.size()).long(),
                                                        size_average=False)
         sampled_xent = F.binary_cross_entropy_with_logits(sampled_logits, J.zeros(*sampled_logits.size()).long(),
-                                                       size_average=False)
+                                                          size_average=False)
 
         # NCE-loss is the sum of the true and noise (sampled words)
         # contributions, averaged over the batch.
@@ -113,6 +113,7 @@ class Word2VecModel(nn.Module):
         norm_tensor = tensor / torch.norm(tensor)
         return torch.matmul(self._encoder.weight.data / self.embedding_norms, norm_tensor)
 
+
 class Token(object):
     """
     Class for storing token level information
@@ -124,7 +125,7 @@ class Token(object):
 
         :param index: The id of the token
         :param text: The text of the token
-        :param frequency: The total number of occurences of the token in the corpus
+        :param frequency: The total number of occurrences of the token in the corpus
         """
         self.index = index
         self.text = text
@@ -144,8 +145,8 @@ class Word2Vec(object):
     If you're finished training a model (=no more updates, only querying)
     then switch to the :mod:`gensim.models.KeyedVectors` instance in wv
 
-    The model can be stored/loaded via its `save()` and `load()` methods, or stored/loaded in a format
-    compatible with the original word2vec implementation via `wv.save_word2vec_format()` and `KeyedVectors.load_word2vec_format()`.
+    # TODO: Need to add save() and load() methods
+    The model can be stored/loaded via its `save()` and `load()` methods.
 
     """
     def __init__(self, sentences, embedding_size=200, learning_rate=0.25, min_learning_rate=0.0001, num_neg_samples=5,
@@ -401,5 +402,5 @@ class Word2Vec(object):
             return similarities
 
         # Get the topk
-        scores, indicies = torch.topk(similarities, k=topn)
-        return [(self.tokens[idx], score) for idx, score in zip(indicies, scores)]
+        scores, indices = torch.topk(similarities, k=topn)
+        return [(self.tokens[idx], score) for idx, score in zip(indices, scores)]
