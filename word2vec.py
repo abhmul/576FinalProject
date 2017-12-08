@@ -44,12 +44,12 @@ class Word2Vec(object):
     If you're finished training a model (=no more updates, only querying)
     then switch to the :mod:`gensim.models.KeyedVectors` instance in wv
 
-    # TODO: Need to add save() and load() methods
     The model can be stored/loaded via its `save()` and `load()` methods.
 
     """
-    def __init__(self, sentences=None, model_func=None, embedding_size=200, learning_rate=0.025, min_learning_rate=0.0001, num_neg_samples=5,
-                 batch_size=1, epochs=5, window_size=5, dynamic_window=True, min_count=0, subsample=1e-3, seed=None):
+    def __init__(self, sentences=None, model_func=None, embedding_size=300, learning_rate=0.025,
+                 min_learning_rate=0.0001, num_neg_samples=10, batch_size=100, epochs=5, window_size=5,
+                 dynamic_window=True, min_count=5, subsample=1e-3, seed=None):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -59,12 +59,13 @@ class Word2Vec(object):
 
         :param sentences: an iterable of `sentences` where each `sentence` is a list of tokens (usually words)
         :param embedding_size: the dimensionality of the feature vectors.
-        :param learning_rate: the initial learning rate (will linearly drop to `min_learning_rate` as training progresses)
+        :param learning_rate: the initial learning rate (will linearly drop to `min_learning_rate` as training
+            progresses)
         :param min_learning_rate: the minimum possible learning rate
         :param num_neg_samples: if > 0, negative sampling will be used, the int for negative specifies how many
             "noise words" should be drawn (usually between 5-20).
             Default is 5. If set to 0, no negative samping is used.
-        :param batch_size: The number of sentences to pass through the model before updating the weights
+        :param batch_size: The minimum number of token pairs to pass through the model before updating the weights
         :param window_size: Window size around a token that defines the context of a token. `window_size` tokens to the
             the left and to the right are included in the context.
         :param dynamic_window: Whether or not to randomly decrease the window size when training like in the original
@@ -93,7 +94,7 @@ class Word2Vec(object):
         self.vocab_size = None
         self.sampling_probs = None
         self.unigram_probs = None
-        self.model_func = None
+        self._model_func = model_func
         self._model = None
 
         # Seed the random number generator
@@ -107,6 +108,7 @@ class Word2Vec(object):
         # Build the vocab
         self.tokens, self.vocab, self.corpus_length = self.build_vocab(sentences, self.min_count)
         self.vocab_size = len(self.tokens)
+        print("Vocabulary Size:", self.vocab_size)
         # Quick sanity check
         assert all(token.index == i for i, token in enumerate(self.tokens))
         assert len(self.tokens) == len(self.vocab) == self.vocab_size
@@ -120,7 +122,6 @@ class Word2Vec(object):
             return
 
         # Build the actual model
-        self._model_func = model_func
         self._model = self.build_model()
 
         # Optimizer
@@ -186,7 +187,6 @@ class Word2Vec(object):
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
-        sent_count = 0
         for sentence in sentences:
             # Get the tokens of the words in the sentence and prune any words not in the vocabulary
             sent_tokens = [self.vocab[w] for w in sentence if w in self.vocab]
@@ -209,28 +209,18 @@ class Word2Vec(object):
                     if pos2 != pos:
                         token_pairs.append((token, ctx_token))
 
-            # step the sentence count
-            sent_count += 1
-
-            # print(sent_count)
-
-            if sent_count % self.batch_size == 0:
-                # print(len(token_pairs))
-                # Construct the batch and yield
-                yield self.create_sg_batch(token_pairs), self.batch_size
-                # Reset the token pairs
-                token_pairs = []
-
-        # Sanity check
-        # assert sent_count == self.corpus_length
+                if len(token_pairs) >= self.batch_size:
+                    # Construct the batch and yield
+                    yield self.create_sg_batch(token_pairs)
+                    # Reset the token pairs
+                    token_pairs = []
 
         # Yield again if we still have some samples left
         if len(token_pairs) != 0:
-            yield self.create_sg_batch(token_pairs), sent_count % self.batch_size
+            yield self.create_sg_batch(token_pairs)
 
     def create_sg_batch(self, token_pairs):
-        # input_token_batch = np.empty((len(token_pairs), 1), dtype='O')
-        # ctx_token_batch = np.empty((len(token_pairs), 1), dtype='O')
+        # TODO: Make Numpy placeholders to fill for memory efficiency and speedup.
         input_token_batch, ctx_token_batch = zip(*token_pairs)
         input_token_batch = np.array(input_token_batch).reshape(len(input_token_batch), 1)
         ctx_token_batch = np.array(ctx_token_batch).reshape(len(ctx_token_batch), 1)
@@ -239,39 +229,51 @@ class Word2Vec(object):
         return input_token_batch, ctx_token_batch, neg_token_batch
 
     def train(self, sentences):
+        # Variables for annealing the learning rate
+        lr = self.learning_rate
+        last_n = 0
         num_sentences = self.corpus_length * self.epochs
-        lr_step = (1 / num_sentences) * (self.learning_rate - self.min_learning_rate)
+        lr_diff = self.learning_rate - self.min_learning_rate
+
         # Run each epoch
         num_updates = 0
         for epoch in range(self.epochs):
             print("Epoch {}/{}".format(epoch+1, self.epochs))
-            epoch_losses = []
+            true_epoch_losses = []
+            sampled_epoch_losses = []
             # Run through each batch
             progbar_sentences = tqdm(sentences, total=self.corpus_length)
-            for (input_token_batch, ctx_token_batch, neg_token_batch), n_batch_sents in self.generate_sg_batch(
-                    progbar_sentences):
+            for input_token_batch, ctx_token_batch, neg_token_batch in self.generate_sg_batch(progbar_sentences):
+                # print([(t1[0].text, t2[0].text, [t3i.text for t3i in t3.flatten()]) for t1, t2, t3 in
+                #        zip(input_token_batch, ctx_token_batch, neg_token_batch)])
                 # print("running train model iteration")
                 # Zero out the current gradient
                 self._optimizer.zero_grad()
                 # Do the forward pass
                 true_logits, neg_logits = self._model(input_token_batch, ctx_token_batch, neg_token_batch)
-                loss = self._model.loss(true_logits, neg_logits)
+                true_xent, sampled_xent = self._model.loss(true_logits, neg_logits)
                 # Do the backward pass
-                loss.backward()
-                epoch_losses.append(loss.data[0])
-                progbar_sentences.set_postfix({"loss": np.average(epoch_losses)})
+                (true_xent + sampled_xent).backward()
+                # Do some logging
+                true_epoch_losses.append(true_xent.data[0] / len(input_token_batch))
+                sampled_epoch_losses.append(sampled_xent.data[0] / len(input_token_batch) / self.num_neg_samples)
+                progbar_sentences.set_postfix({"true": np.average(true_epoch_losses[-10:]),
+                                               "sampled": np.average(sampled_epoch_losses[-10:])})
                 # Step the optimizer
                 self._optimizer.step()
                 num_updates += 1
 
-                # Anneal the learning rate
-                self.learning_rate = max(self.min_learning_rate, self.learning_rate - n_batch_sents * lr_step)
-                # print(self.learning_rate)
-                for param_group in self._optimizer.param_groups:
-                    param_group['lr'] = self.learning_rate
+                # Anneal the learning rate every sentence
+                if progbar_sentences.n != last_n:
+                    sent_passed = epoch * self.corpus_length + progbar_sentences.n
+                    lr = max(self.min_learning_rate, self.learning_rate - (sent_passed / num_sentences) * lr_diff)
+                    # print(self.learning_rate)
+                    for param_group in self._optimizer.param_groups:
+                        param_group['lr'] = lr
 
             # Log the epoch's loss
-            print(np.average(epoch_losses))
+            print("True:", np.average(true_epoch_losses))
+            print("Sampled:", np.average(sampled_epoch_losses))
 
     def most_similar(self, positive=tuple(), negative=tuple(), topn=10, restrict_vocab=None, indexer=None):
         """
@@ -326,7 +328,7 @@ class Word2Vec(object):
         return [(self.tokens[idx], score) for idx, score in zip(indices, scores)]
 
     def save(self, fname):
-        if self._model_func is not None:
+        if self._model is not None:
             torch.save(self._model.state_dict(), fname + ".state_dict")
         # Save the numpy arrays if their there
         if self.tokens is not None:
@@ -337,11 +339,11 @@ class Word2Vec(object):
                   "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
                   "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
-                  "seed": random.randint(0, 2 ** 32)}
+                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
-                      "model_func": self._model_func, "numpy_saved": self.tokens is not None}
+                      "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}
         with open(fname + ".pkl", 'wb') as save_file:
-            pickle.dump(save_file, (params, attributes))
+            pickle.dump((params, attributes), save_file)
 
     @staticmethod
     def load(fname):
@@ -350,18 +352,21 @@ class Word2Vec(object):
         # Create the Word2Vec wrapper
         word2vec = Word2Vec(**params)
 
-        # Load the model if we have one
-        if attributes["model_func"] is not None:
-            word2vec._model_func = attributes["model_func"]
-            word2vec._model = word2vec.build_model()
-            word2vec._model.load_state_dict(torch.load(fname + ".state_dict"))
-            word2vec._optimizer = word2vec.build_optimizer()
         # Load the vocabulary attributes from numpy
+        word2vec.vocab = attributes["vocab"]
+        word2vec.corpus_length = attributes["corpus_length"]
+        word2vec.vocab_size = attributes["vocab_size"]
         if attributes["numpy_saved"]:
             vocab_arrays = np.load(fname + ".npz")
             word2vec.tokens = vocab_arrays["tokens"]
             word2vec.sampling_probs = vocab_arrays["sampling_probs"]
             word2vec.unigram_probs = vocab_arrays["unigram_probs"]
+
+        # Load the model if we have one
+        if attributes["model_saved"] is not None:
+            word2vec._model = word2vec.build_model()
+            word2vec._model.load_state_dict(torch.load(fname + ".state_dict"))
+            word2vec._optimizer = word2vec.build_optimizer()
 
         return word2vec
 

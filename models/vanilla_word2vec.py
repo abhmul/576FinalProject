@@ -29,9 +29,9 @@ class VanillaWord2Vec(nn.Module):
 
         # Use sparse for more memory efficient computations
         # Note that only SGD will work with sparse embedding layers on a GPU
-        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=False)
+        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
         self._encoder.weight.data.uniform_(-0.5 / self.embedding_size, 0.5 / self.embedding_size)
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=False)
+        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
         self._decoder.weight.data.zero_()
 
         self._embedding_norms = None
@@ -82,15 +82,37 @@ class VanillaWord2Vec(nn.Module):
         :return: The loss of the predictions.
         """
 
+        assert true_logits.size(0) == sampled_logits.size(0)
+
+        # Using pytorch's implementation
         # cross-entropy(logits, labels)
-        true_xent = F.binary_cross_entropy_with_logits(true_logits, Variable(J.ones(*true_logits.size())),
-                                                       size_average=False)
-        sampled_xent = F.binary_cross_entropy_with_logits(sampled_logits, Variable(J.zeros(*sampled_logits.size())),
-                                                          size_average=False)
+        # true_xent = F.binary_cross_entropy_with_logits(true_logits, Variable(J.ones(*true_logits.size())),
+        #                                                size_average=False)
+        # sampled_xent = F.binary_cross_entropy_with_logits(sampled_logits, Variable(J.zeros(*sampled_logits.size())),
+        #                                                   size_average=False)
+
+        # Using ray1007's implementation
+        true_logits = torch.clamp(true_logits, max=10, min=-10)
+        sampled_logits = torch.clamp(sampled_logits, max=10, min=-10)
+        true_xent = torch.sum(-F.logsigmoid(true_logits))
+        sampled_xent = torch.sum(-F.logsigmoid(-sampled_logits))
+
+        # Using tf implementation
+        # true_logits = torch.clamp(true_logits, max=10)
+        # sampled_logits = torch.clamp(sampled_logits, max=10)
+        # def bce_with_logits(x, z):
+        #     # x is logit, z is label
+        #     return torch.clamp(x, min=0) - (x if z else 0) + torch.log(1 + torch.exp(-torch.abs(x)))
+        #
+        # true_xent = torch.sum(bce_with_logits(true_logits, True))
+        # sampled_xent = torch.sum(bce_with_logits(sampled_logits, False))
 
         # NCE-loss is the sum of the true and noise (sampled words)
         # contributions, averaged over the batch.
-        return (true_xent + sampled_xent) / (len(true_xent) + len(sampled_xent))
+        # print(true_xent)
+        # print(sampled_xent)
+        # Multiply by 1000 to get stable gradients
+        return true_xent, sampled_xent
 
     @staticmethod
     def predict(logits):
