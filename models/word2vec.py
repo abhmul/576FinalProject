@@ -38,10 +38,12 @@ class Word2VecModel(nn.Module):
         self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
         self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
 
+        self._embedding_norms = None
+
     @staticmethod
     def token2tensor(tokens):
         """Helper to cast a numpy array of tokens to a torch LongTensor"""
-        J.LongTensor([token.index for token in tokens]).view(*tokens.shape)
+        J.LongTensor([token.index for token in tokens]).view(*np.array(tokens).shape)
 
     def forward(self, input_tokens, ctx_tokens, neg_tokens):
         """
@@ -95,6 +97,21 @@ class Word2VecModel(nn.Module):
         """Defines how an actual prediction is computed using the logits."""
         return F.sigmoid(logits)
 
+    def lookup(self, token):
+        return self._encoder(token.index)
+
+    def lookup_tokens(self, tokens):
+        return self._encoder(self.token2tensor(tokens))
+
+    @property
+    def embedding_norms(self):
+        if self._embedding_norms is None:
+            self._embedding_norms = torch.norm(self._encoder.weight.data, p=2, dim=1)
+        return self._embedding_norms
+
+    def similarities(self, tensor):
+        norm_tensor = tensor / torch.norm(tensor)
+        return torch.matmul(self._encoder.weight.data / self.embedding_norms, norm_tensor)
 
 class Token(object):
     """
@@ -294,7 +311,7 @@ class Word2Vec(object):
         assert sent_count == self.corpus_length
 
         # Yield again if we still have some samples left
-        if sent_count % self.batch_size != 0:
+        if len(token_pairs) != 0:
             yield self.create_sg_batch(token_pairs), sent_count % self.batch_size
 
     def create_sg_batch(self, token_pairs):
@@ -334,3 +351,55 @@ class Word2Vec(object):
                 self.learning_rate = max(self.min_learning_rate, self.learning_rate - n_batch_sents * lr_step)
                 for param_group in self._optimizer.param_groups:
                     param_group['lr'] = self.learning_rate
+
+    def most_similar(self, positive=tuple(), negative=tuple(), topn=10, restrict_vocab=None, indexer=None):
+        """
+        Find the top-N most similar words. Positive words contribute positively towards the
+        similarity, negative words negatively.
+
+        This method computes cosine similarity between a simple mean of the projection
+        weight vectors of the given words and the vectors for each word in the model.
+        The method corresponds to the `word-analogy` and `distance` scripts in the original
+        word2vec implementation.
+
+        If topn is False, most_similar returns the vector of similarity scores.
+
+        `restrict_vocab` is an optional integer which limits the range of vectors which
+        are searched for most-similar values. For example, restrict_vocab=10000 would
+        only check the first 10000 word vectors in the vocabulary order. (This may be
+        meaningful if you've sorted the vocabulary by descending frequency.)
+
+        Example::
+
+          >>> trained_model.most_similar(positive=['woman', 'king'], negative=['man'])
+          [('queen', 0.50882536), ...]
+
+        """
+        # Check that something was provided
+        assert len(positive) + len(negative) > 0, "You must provide words to compare to!"
+
+        if isinstance(positive, str):
+            # allow calls like most_similar('dog'), as a shorthand for most_similar(['dog'])
+            positive = [positive]
+
+        if isinstance(negative, str):
+            negative = [negative]
+
+        # add weights for each word, if not already present; default to 1.0 for positive and -1.0 for negative words
+        input_words_weights = [(word, 1.0) if isinstance(word, str) else word for word in positive] + [
+            (word, -1.0) if isinstance(word, str) else word for word in negative]
+        input_words, input_weights = zip(*input_words_weights)
+
+        # Get each word's respective tokens
+        input_tokens = [self.vocab[word] for word in input_words]
+
+        # compute the weighted average of all words
+        mean_tensor = torch.matmul(J.Tensor(input_weights), self._model.lookup_tokens(input_tokens))
+        similarities = self._model.similarities(mean_tensor)
+        # If we don't need the topn, just return the vector
+        if not topn:
+            return similarities
+
+        # Get the topk
+        scores, indicies = torch.topk(similarities, k=topn)
+        return [(self.tokens[idx], score) for idx, score in zip(indicies, scores)]
