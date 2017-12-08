@@ -2,48 +2,74 @@ import argparse
 
 from gensim.corpora.wikicorpus import WikiCorpus
 
-from models import MODEL_DICT
+import models
 from word2vec import Word2Vec
+
+SEED = 2415
 
 parser = argparse.ArgumentParser()
 # Main arguments
-parser.add_argument("-c", "--corpus", help="The path to the corpus to train the model on.")
-parser.add_argument("-m", "--model", help="The name of the model to train.")
+parser.add_argument("-c", "--corpus", required=True, help="The path to the corpus to train the model on.")
+parser.add_argument("-m", "--model", required=True, help="The name of the model to train. The available models are: " +
+                                                         ", ".join(models.get_available_models()))
 
 # Optional arguments
 parser.add_argument("--token_min_len", type=int, default=2, help="The minimum length token to keep.")
 parser.add_argument("--token_max_len", type=int, default=15, help="The maximum length token to keep.")
-parser.add_argument("--embedding_size", type=int, default=100, help="The size of the embeddings to train.")
+
+parser.add_argument("--embedding_size", type=int, default=300, help="The size of the embeddings to train.")
+parser.add_argument("--learning_rate", type=float, default=0.025, help="The initial learning rate of the gradient " +
+                                                                       "descent.")
+parser.add_argument("--min_learning_rate", type=float, default=0.0001, help="The minimum possible learning rate of " +
+                                                                            "the gradient descent.")
+parser.add_argument("--num_neg_samples", type=int, default=10, help="Number of noise (negative) words to sample per " +
+                                                                    "token pair")
+parser.add_argument("--batch_size", type=int, default=10000, help="The minimum number of token pairs to pass through " +
+                                                                "the model before updating the weights")
+parser.add_argument("--epochs", type=int, default=5, help="Number of epochs to train the model for.")
+parser.add_argument("--window_size", type=int, default=5, help="Window size around a token that defines the context " +
+                                                               "of a token")
+parser.add_argument("--no_dynamic_window", action="store_false", help="Turns of the dynamic window on the model.")
+parser.add_argument("--min_count", type=int, default=5, help="Only keeps tokens with at least `min_count` frequency.")
+parser.add_argument("--subsample", type=float, default=1e-4, help="Subsampling constant for frequent words.")
+
+parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
 
 # Test arguments
-parser.add_argument("-t", "--test", action='store_true', default=False,
-                    help="Runs the train script in debug.")
+parser.add_argument("-t", "--test", type=float, default=float('inf'),
+                    help="Runs the train script only using this many documents from the dataset.")
 args = parser.parse_args()
 
 # Get the model factory
-model_func = MODEL_DICT[args.model]
+model_func = models.load_model_func(args.model)
 
 # Get corpus
 corpus = WikiCorpus(args.corpus, lemmatize=False, dictionary={}, token_min_len=args.token_min_len,
-                    token_max_len=args.token_max_len).get_texts()
+                    token_max_len=args.token_max_len)
 
 
-# Used for debugging purposes
-class TestCorpus(object):
+# Used for regeneration purposes
+class CorpusGen(object):
 
     def __init__(self, corpus_obj, num_docs):
         self.corpus_obj = corpus_obj
         self.num_docs = num_docs
 
     def __iter__(self):
-        for i, doc in enumerate(self.corpus_obj):
+        for i, doc in enumerate(self.corpus_obj.get_texts()):
             if i >= self.num_docs:
                 break
             yield doc
 
 
-if args.test:
-    corpus = TestCorpus(corpus, 1000)
+corpus = CorpusGen(corpus, args.test)
 
 # Pass it to the trainer
-Word2Vec(corpus, model_func, embedding_size=args.embedding_size, min_count=1, window_size=5, learning_rate=0.025)
+w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_rate=args.learning_rate,
+               min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
+               batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
+               dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED)
+
+# Save the model
+if args.save:
+    w2v.save(args.save)
