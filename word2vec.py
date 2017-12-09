@@ -365,7 +365,8 @@ class Word2Vec(object):
         # Load the model if we have one
         if attributes["model_saved"] is not None:
             word2vec._model = word2vec.build_model()
-            word2vec._model.load_state_dict(torch.load(fname + ".state_dict"))
+            saved_state = torch.load(fname + ".state_dict", map_location=lambda storage, loc: storage)
+            word2vec._model.load_state_dict(saved_state)
             word2vec._optimizer = word2vec.build_optimizer()
 
         return word2vec
