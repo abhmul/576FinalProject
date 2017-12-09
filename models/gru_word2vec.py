@@ -6,7 +6,8 @@ from torch.autograd import Variable
 
 import pyjet.backend as J
 
-from . import AWord2Vec
+from .abstract_word2vec import AWord2Vec
+
 
 class GRUWord2Vec(AWord2Vec):
     """
@@ -36,7 +37,7 @@ class GRUWord2Vec(AWord2Vec):
         # Freeze the encodings
         self._char_encoder.weight.requires_grad = False
 
-        self._encoder = nn.GRU(self.num_chars, self.embedding_size, 1,
+        self._encoder = nn.GRU(self.num_chars, self.embedding_size, 1, batch_first=True,
                                bidirectional=self.bidirectional)
         # Use sparse for more memory efficient computations
         # Note that only SGD will work with sparse embedding layers on a GPU
@@ -50,8 +51,6 @@ class GRUWord2Vec(AWord2Vec):
 
     def chartoken2tensor(self, tokens):
         """Helper to cast a list of tokens to a torch LongTensor"""
-        # Shape of tokens is B x W
-        tokens = np.array(tokens)
         assert tokens.ndim == 0
 
         charids = [[self.char2id[char] for char in token.text] for token in tokens.flatten()]
@@ -59,31 +58,31 @@ class GRUWord2Vec(AWord2Vec):
         # Create the padded one hot encodings
         max_seq_len = max(seq_lens)
         # B*W x L
-        charids = J.LongTensor(
-            [charid_array + [self.num_chars] * (max_seq_len - len(charid_array)) for charid_array in charids])
+        charids = Variable(J.LongTensor(
+            [charid_array + [self.num_chars] * (max_seq_len - len(charid_array)) for charid_array in charids]))
         # Get the one hot encodings
         onehots = self._char_encoder(charids)  # B*W x L x C
         assert onehots.size(0) == tokens.shape[0] * tokens.shape[1]
 
-        return onehots, seq_lens
-
+        return onehots, J.LongTensor(seq_lens)
 
     def lookup(self, token):
-        return self._encoder(token.index)
+        return self.lookup_tokens(np.array([[token]]))
 
     def lookup_tokens(self, tokens):
+        # Shape of tokens is B x W
+        tokens = np.array(tokens)
         # create the one-hot char encodings
         # B*W x L x C
         char_encodings, seq_lens = self.chartoken2tensor(tokens)
         outputs, _ = self._encoder(char_encodings)
+        # Select the last encoding and reshape into B x W
+        outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
         return outputs
 
     @property
     def embedding_norms(self):
-        if self._embedding_norms is None:
-            self._embedding_norms = torch.norm(self._encoder.weight.data, p=2, dim=1)
-        return self._embedding_norms
+        raise NotImplementedError()
 
     def similarities(self, tensor):
-        norm_tensor = tensor / torch.norm(tensor)
-        return torch.matmul(self._encoder.weight.data / self.embedding_norms, norm_tensor)
+        raise NotImplementedError()

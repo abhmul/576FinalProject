@@ -106,7 +106,7 @@ class Word2Vec(object):
             return
 
         # Build the vocab
-        self.tokens, self.vocab, self.corpus_length = self.build_vocab(sentences, self.min_count)
+        self.tokens, self.vocab, self.char2id, self.corpus_length = self.build_vocab(sentences, self.min_count)
         self.vocab_size = len(self.tokens)
         print("Vocabulary Size:", self.vocab_size)
         # Quick sanity check
@@ -133,6 +133,8 @@ class Word2Vec(object):
     @staticmethod
     def build_vocab(sentences, min_count):
         word_freqs = defaultdict(int)
+        char2id = {}
+        charids = 0
         corpus_length = 0
 
         # Do first pass through to collect frequencies
@@ -141,6 +143,11 @@ class Word2Vec(object):
             corpus_length += 1
             for word in sentence:
                 word_freqs[word] += 1
+                # Get all the characters in the text
+                for char in word:
+                    if char not in char2id:
+                        char2id[char] = charids
+                        charids += 1
 
         # The vocabulary is mapped to id with most frequent being 1
         id2word = sorted((w for w in word_freqs if word_freqs[w] >= min_count), key=lambda k: word_freqs[k], reverse=True)
@@ -149,7 +156,7 @@ class Word2Vec(object):
         tokens = np.array([Token(index=i, text=w, frequency=word_freqs[w]) for i, w in enumerate(id2word)])
         # Create a hashable set of the tokens
         vocab = {token.text: token for token in tokens}
-        return tokens, vocab, corpus_length
+        return tokens, vocab, char2id, corpus_length
 
     def build_optimizer(self):
         return optim.SGD(self._model.parameters(), lr=self.learning_rate)
@@ -183,7 +190,7 @@ class Word2Vec(object):
         return unigram_probs
 
     def build_model(self):
-        return self._model_func(self.vocab_size, self.embedding_size)
+        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []

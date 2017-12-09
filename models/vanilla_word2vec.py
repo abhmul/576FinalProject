@@ -3,7 +3,7 @@ import torch.nn as nn
 
 import pyjet.backend as J
 
-from . import AWord2Vec
+from .abstract_word2vec import AWord2Vec
 
 
 class VanillaWord2Vec(AWord2Vec):
