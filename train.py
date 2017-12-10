@@ -1,6 +1,6 @@
 import argparse
 
-from gensim.corpora.wikicorpus import WikiCorpus
+from gensim.models.word2vec import Text8Corpus
 
 import models
 from word2vec import Word2Vec
@@ -14,15 +14,15 @@ parser.add_argument("-m", "--model", required=True, help="The name of the model 
                                                          ", ".join(models.get_available_models()))
 
 # Optional arguments
-parser.add_argument("--token_min_len", type=int, default=2, help="The minimum length token to keep.")
-parser.add_argument("--token_max_len", type=int, default=15, help="The maximum length token to keep.")
+# parser.add_argument("--token_min_len", type=int, default=2, help="The minimum length token to keep.")
+# parser.add_argument("--token_max_len", type=int, default=15, help="The maximum length token to keep.")
 
-parser.add_argument("--embedding_size", type=int, default=300, help="The size of the embeddings to train.")
+parser.add_argument("--embedding_size", type=int, default=100, help="The size of the embeddings to train.")
 parser.add_argument("--learning_rate", type=float, default=0.025, help="The initial learning rate of the gradient " +
                                                                        "descent.")
 parser.add_argument("--min_learning_rate", type=float, default=0.0001, help="The minimum possible learning rate of " +
                                                                             "the gradient descent.")
-parser.add_argument("--num_neg_samples", type=int, default=10, help="Number of noise (negative) words to sample per " +
+parser.add_argument("--num_neg_samples", type=int, default=5, help="Number of noise (negative) words to sample per " +
                                                                     "token pair")
 parser.add_argument("--batch_size", type=int, default=10000, help="The minimum number of token pairs to pass through " +
                                                                   "the model before updating the weights")
@@ -31,7 +31,7 @@ parser.add_argument("--window_size", type=int, default=5, help="Window size arou
                                                                "of a token")
 parser.add_argument("--no_dynamic_window", action="store_false", help="Turns of the dynamic window on the model.")
 parser.add_argument("--min_count", type=int, default=5, help="Only keeps tokens with at least `min_count` frequency.")
-parser.add_argument("--subsample", type=float, default=1e-4, help="Subsampling constant for frequent words.")
+parser.add_argument("--subsample", type=float, default=0.001, help="Subsampling constant for frequent words.")
 parser.add_argument("--use_adam", action="store_true", help="Whether or not to use adam to optimize the model.")
 
 parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
@@ -45,8 +45,9 @@ args = parser.parse_args()
 model_func = models.load_model_func(args.model)
 
 # Get corpus
-corpus = WikiCorpus(args.corpus, lemmatize=False, dictionary={}, token_min_len=args.token_min_len,
-                    token_max_len=args.token_max_len)
+corpus = Text8Corpus(args.corpus)
+                     #, lemmatize=False, dictionary={}, token_min_len=args.token_min_len,
+                    #token_max_len=args.token_max_len)
 
 
 # Used for regeneration purposes
@@ -57,7 +58,7 @@ class CorpusGen(object):
         self.num_docs = num_docs
 
     def __iter__(self):
-        for i, doc in enumerate(self.corpus_obj.get_texts()):
+        for i, doc in enumerate(self.corpus_obj):
             if i >= self.num_docs:
                 break
             yield doc
@@ -70,7 +71,7 @@ w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_
                min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
                batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
                dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED,
-               use_adam=args.use_adam)
+               use_adam=args.use_adam, save_fname=args.save)
 
 # Save the model
 if args.save:
