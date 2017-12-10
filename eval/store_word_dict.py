@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.linalg import norm
-import cPickle
+import pickle
 
 #requires a formatted text file of vectors -- TODO formatted how?
 def store_word_vecs_dict(word_vecs_file_name, dict_file_name):
@@ -8,7 +8,7 @@ def store_word_vecs_dict(word_vecs_file_name, dict_file_name):
     (after normalizing the vectors), and save the dict as a pickle
     file. The vectors are numpy float arrays.
     """
-    with open(word_vecs_file_name, 'r') as word_vecs_file:
+    with open(word_vecs_file_name, 'r', encoding="utf-8") as word_vecs_file:
         line_num = 1
         word_vecs_dict = {}
         for line in word_vecs_file:
@@ -20,20 +20,12 @@ def store_word_vecs_dict(word_vecs_file_name, dict_file_name):
                 vector = np.array([float(v) for v in values])
                 word_vecs_dict[word] = vector / norm(vector)
 
-                if line_num % 100 == 0:
-                    print 'Line', line_num, 'processed'
+                if line_num % 100000 == 0:
+                    print("Processed line: ", line_num)
+                if line_num > 815380:
+                    break
 
             line_num += 1
                     
         with open(dict_file_name, 'wb') as dict_file:
-            cPickle.dump(word_vecs_dict, dict_file, cPickle.HIGHEST_PROTOCOL)
-
-            
-import os
-if not os.path.isdir('dicts'):
-    os.makedirs('dicts')
-
-# Can choose either word2vec or GloVe vectors
-word_vecs_file_name = 'GoogleNews-vectors-negative300.txt'#'glove/crawl/glove.840B.300d.txt'#
-dict_file_name = 'dicts/word2vec-GoogleNews-vecs300-norm.pickle'#'dicts/glove-crawl840B-vecs300-norm.pickle'#
-store_word_vecs_dict(word_vecs_file_name, dict_file_name)
+            pickle.dump(word_vecs_dict, dict_file, pickle.HIGHEST_PROTOCOL)

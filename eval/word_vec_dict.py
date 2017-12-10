@@ -1,4 +1,4 @@
-import cPickle
+import pickle
 from scipy.spatial.distance import cosine, euclidean
 from operator import itemgetter
 import heapq
@@ -11,6 +11,9 @@ class WordVecDict:
         self.word_vecs_dict = {}
         self.all_words = []
         self.all_vecs = []
+
+    def get_dict(self):
+        return self.word_vecs_dict
 
     def generate_dict(vocabulary):
         """
@@ -29,15 +32,25 @@ class WordVecDict:
         self.all_words = np.array(self.word_vecs_dict.keys())
         self.all_vecs = np.array(self.word_vecs_dict.values()).T #why transpose?
 
+    def load_dict(self, dict_file_name):
+        """Load the word-vector dictionary from the given pickle file."""
+        with open(dict_file_name, 'rb') as dict_file:
+            self.word_vecs_dict = pickle.load(dict_file)
+
+        self.all_words = np.array(self.word_vecs_dict.keys())
+        self.all_vecs = np.array(self.word_vecs_dict.values()).T
+
+
     def has_dict(self):
-        return self.word_vecs_dict != None
+        return self.word_vecs_dict != {} and self.word_vecs_dict != None
 
 
     def has_words(self, *words):
         """Determine whether all given words are in the dictionary."""
+        # print(self.word_vecs_dict.keys()[:5])
         for word in words:
             if word not in self.word_vecs_dict:
-                print word, 'is not in the dictionary'
+                print(word, 'is not in the dictionary')
                 return False
         return True
 
@@ -77,7 +90,7 @@ class WordVecDict:
 
         # Remove remove_words from the list of results
         masks = [self.allWords != word for word in remove_words]
-        init_mask = np.ones(len(allSims), dtype='bool')
+        init_mask = np.ones(len(all_sims), dtype='bool')
         mask = reduce(np.logical_and, masks, init_mask)
 
         # Attach each similarity to the correct word
