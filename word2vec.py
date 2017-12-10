@@ -49,7 +49,7 @@ class Word2Vec(object):
     """
     def __init__(self, sentences=None, model_func=None, embedding_size=300, learning_rate=0.025,
                  min_learning_rate=0.0001, num_neg_samples=10, batch_size=100, epochs=5, window_size=5,
-                 dynamic_window=True, min_count=5, subsample=1e-3, seed=None):
+                 dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None, save_fname=""):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -86,12 +86,14 @@ class Word2Vec(object):
         self.dynamic_window = dynamic_window
         self.min_count = min_count
         self.subsample = subsample
+        self.use_adam = use_adam
 
         # Uninitialized variables
         self.tokens = None
         self.vocab = None
         self.corpus_length = None
         self.vocab_size = None
+        self.char2id = None
         self.sampling_probs = None
         self.unigram_probs = None
         self._model_func = model_func
@@ -109,6 +111,7 @@ class Word2Vec(object):
         self.tokens, self.vocab, self.char2id, self.corpus_length = self.build_vocab(sentences, self.min_count)
         self.vocab_size = len(self.tokens)
         print("Vocabulary Size:", self.vocab_size)
+        print("Character Vocabulary Size:", len(self.char2id))
         # Quick sanity check
         assert all(token.index == i for i, token in enumerate(self.tokens))
         assert len(self.tokens) == len(self.vocab) == self.vocab_size
@@ -116,19 +119,22 @@ class Word2Vec(object):
         # Build the distribution for sampling for batches and negative sampling
         self.sampling_probs = self.build_sampling_distribution()
         self.unigram_probs = self.build_unigram_distribution()
+        print("Built Sampling Distributions")
 
         # If no model is provided, don't train the word2vec
         if model_func is None:
             return
 
         # Build the actual model
-        self._model = self.build_model()
+        self._model = self.build_model(sparse=(not use_adam))
+        print("Built", self._model.__class__.__name__, "with", "sparse" if not use_adam else "dense", "embeddings.")
 
         # Optimizer
-        self._optimizer = self.build_optimizer()
+        self._optimizer = self.build_optimizer(use_adam)
+        print("Built optimizer:", self._optimizer.__class__.__name__)
 
         # Train the model
-        self.train(sentences)
+        self.train(sentences, save_fname=save_fname)
 
     @staticmethod
     def build_vocab(sentences, min_count):
@@ -158,8 +164,14 @@ class Word2Vec(object):
         vocab = {token.text: token for token in tokens}
         return tokens, vocab, char2id, corpus_length
 
-    def build_optimizer(self):
-        return optim.SGD(self._model.parameters(), lr=self.learning_rate)
+    def build_optimizer(self, use_adam=False):
+        params = [param for param in self._model.parameters() if param.requires_grad]
+        if use_adam:
+            print("Building Adam")
+            return optim.Adam(params)
+        print("Building SGD with learning rate", self.learning_rate)
+        return optim.SGD(params, lr=self.learning_rate)
+
 
     def build_sampling_distribution(self):
         total_words = float(sum(token.frequency for token in self.tokens))
@@ -189,8 +201,8 @@ class Word2Vec(object):
         unigram_probs = unigram_probs / np.sum(unigram_probs)
         return unigram_probs
 
-    def build_model(self):
-        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id)
+    def build_model(self, sparse=True):
+        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
@@ -235,7 +247,7 @@ class Word2Vec(object):
         neg_token_batch = np.random.choice(self.tokens, size=(len(token_pairs), self.num_neg_samples), p=self.unigram_probs)
         return input_token_batch, ctx_token_batch, neg_token_batch
 
-    def train(self, sentences):
+    def train(self, sentences, save_fname=""):
         # Variables for annealing the learning rate
         lr = self.learning_rate
         last_n = 0
@@ -265,13 +277,14 @@ class Word2Vec(object):
                 true_epoch_losses.append(true_xent.data[0] / len(input_token_batch))
                 sampled_epoch_losses.append(sampled_xent.data[0] / len(input_token_batch) / self.num_neg_samples)
                 progbar_sentences.set_postfix({"true": np.average(true_epoch_losses[-10:]),
-                                               "sampled": np.average(sampled_epoch_losses[-10:])})
+                                               "sampled": np.average(sampled_epoch_losses[-10:]),
+                                               "lr": lr})
                 # Step the optimizer
                 self._optimizer.step()
                 num_updates += 1
 
-                # Anneal the learning rate every sentence
-                if progbar_sentences.n != last_n:
+                # Anneal the learning rate every sentence if using sgd
+                if progbar_sentences.n != last_n and not self.use_adam:
                     sent_passed = epoch * self.corpus_length + progbar_sentences.n
                     lr = max(self.min_learning_rate, self.learning_rate - (sent_passed / num_sentences) * lr_diff)
                     # print(self.learning_rate)
@@ -281,6 +294,10 @@ class Word2Vec(object):
             # Log the epoch's loss
             print("True:", np.average(true_epoch_losses))
             print("Sampled:", np.average(sampled_epoch_losses))
+            # If we want to save, save it
+            if save_fname:
+                self.save(save_fname)
+                print("Saved file to", save_fname)
 
     def most_similar(self, positive=tuple(), negative=tuple(), topn=10, restrict_vocab=None, indexer=None):
         """
@@ -334,6 +351,19 @@ class Word2Vec(object):
         scores, indices = torch.topk(similarities, k=topn)
         return [(self.tokens[idx], score) for idx, score in zip(indices, scores)]
 
+    def export_vectors(self, fname):
+        # Lookup all the words
+        embeddings = self._model.lookup_tokens(self.tokens).data
+        if J.use_cuda:
+            embeddings = embeddings.cpu()
+        embeddings = embeddings.numpy()
+        embeddings /= np.linalg.norm(embeddings, axis=1)[:, np.newaxis]
+        with open(fname, 'w') as vector_file:
+            # First row is "NUM_WORDS EMBEDDING_SIZE"
+            vector_file.write("{} {}\n".format(self.vocab_size, self.embedding_size))
+            for i, token in enumerate(tqdm(self.tokens)):
+                vector_file.write("{} {}\n".format(token.text, " ".join(str(val) for val in embeddings[i])))
+
     def save(self, fname):
         if self._model is not None:
             torch.save(self._model.state_dict(), fname + ".state_dict")
@@ -346,7 +376,7 @@ class Word2Vec(object):
                   "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
                   "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
-                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func}
+                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}
         with open(fname + ".pkl", 'wb') as save_file:
@@ -354,6 +384,7 @@ class Word2Vec(object):
 
     @staticmethod
     def load(fname):
+        print(fname)
         with open(fname + ".pkl", 'rb') as load_file:
             params, attributes = pickle.load(load_file)
         # Create the Word2Vec wrapper

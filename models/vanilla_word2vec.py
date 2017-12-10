@@ -4,6 +4,7 @@ import torch.nn as nn
 import pyjet.backend as J
 
 from .abstract_word2vec import AWord2Vec
+from . import register_model_func
 
 
 class VanillaWord2Vec(AWord2Vec):
@@ -14,7 +15,7 @@ class VanillaWord2Vec(AWord2Vec):
     should not be trained directly, but rather through the `Word2Vec` class below.
     """
 
-    def __init__(self, vocab_size, embedding_size, **kwargs):
+    def __init__(self, vocab_size, embedding_size, sparse=True, **kwargs):
         """
         Initializes a pytorch word2vec module.
 
@@ -25,9 +26,9 @@ class VanillaWord2Vec(AWord2Vec):
 
         # Use sparse for more memory efficient computations
         # Note that only SGD will work with sparse embedding layers on a GPU
-        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
+        self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
         self._encoder.weight.data.uniform_(-0.5 / self.embedding_size, 0.5 / self.embedding_size)
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=True)
+        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
         self._decoder.weight.data.zero_()
 
         self._embedding_norms = None
@@ -50,3 +51,6 @@ class VanillaWord2Vec(AWord2Vec):
     def similarities(self, tensor):
         norm_tensor = tensor / torch.norm(tensor)
         return torch.matmul(self._encoder.weight.data / self.embedding_norms, norm_tensor)
+
+
+register_model_func(VanillaWord2Vec)
