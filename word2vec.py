@@ -442,10 +442,10 @@ class Word2Vec(object):
 
     def export_vectors(self, fname):
         # Lookup all the words
-        embeddings = self._model.lookup_tokens(self.tokens).data
+        embeddings = self._model.lookup_tokens(self.tokens[:, np.newaxis]).data
         if J.use_cuda:
             embeddings = embeddings.cpu()
-        embeddings = embeddings.numpy()
+        embeddings = embeddings.numpy().reshape(self.vocab_size, self.embedding_size)
         embeddings /= np.linalg.norm(embeddings, axis=1)[:, np.newaxis]
         with open(fname, 'w') as vector_file:
             # First row is "NUM_WORDS EMBEDDING_SIZE"
@@ -467,12 +467,13 @@ class Word2Vec(object):
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
                   "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
+                      "char2id": self.char2id,
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}
         with open(fname + ".pkl", 'wb') as save_file:
             pickle.dump((params, attributes), save_file)
 
     @staticmethod
-    def load(fname):
+    def load(fname, sentences=None, min_count=5):
         print(fname)
         with open(fname + ".pkl", 'rb') as load_file:
             params, attributes = pickle.load(load_file)
@@ -483,6 +484,12 @@ class Word2Vec(object):
         word2vec.vocab = attributes["vocab"]
         word2vec.corpus_length = attributes["corpus_length"]
         word2vec.vocab_size = attributes["vocab_size"]
+        if "char2id" in attributes:
+            word2vec.char2id = attributes["char2id"]
+        # If sentences are provided use them for characters
+        if sentences is not None:
+            tokens, vocab, char2id, corpus_length, sentences = word2vec.build_vocab(sentences, min_count=min_count)
+            word2vec.char2id = char2id
         if attributes["numpy_saved"]:
             vocab_arrays = np.load(fname + ".npz")
             word2vec.tokens = vocab_arrays["tokens"]

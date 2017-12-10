@@ -9,6 +9,8 @@ import pyjet.backend as J
 from .abstract_word2vec import AWord2Vec
 from . import register_model_func
 
+from tqdm import tqdm
+
 
 class CharWord2Vec(AWord2Vec):
 
@@ -92,18 +94,23 @@ class GRUWord2Vec(CharWord2Vec):
     def lookup_tokens(self, tokens):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
-        # create the one-hot char encodings
-        # B*W x L x C
-        char_encodings, seq_lens = self.chartoken2tensor(tokens)
-        outputs, _ = self._encoder(char_encodings)
-        new_outputs = J.zeros(outputs.size(0), outputs.size(2))
-        # Fill it in
-        for seq_len in seq_lens:
-            new_outputs = outputs[:, seq_len-1]
-        outputs = new_outputs.view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-        # Select the last encoding and reshape into B x W
-        # outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-        return outputs
+        all_outputs = []
+        step = 10000
+        for i in tqdm(range(0, len(tokens), step)):
+            token_slice = tokens[i:i+step]
+            # create the one-hot char encodings
+            # B*W x L x C
+            char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+            outputs, _ = self._encoder(char_encodings)
+            new_outputs = J.zeros(outputs.size(0), outputs.size(2))
+            # Fill it in
+            for seq_len in seq_lens:
+                new_outputs = outputs[:, seq_len-1]
+            outputs = new_outputs.view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+            all_outputs.append(outputs)
+            # Select the last encoding and reshape into B x W
+            # outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
+        return torch.cat(all_outputs, dim=0)
 
 
 class PoolGRUWord2Vec(GRUWord2Vec):
@@ -114,13 +121,18 @@ class PoolGRUWord2Vec(GRUWord2Vec):
     def lookup_tokens(self, tokens):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
-        # create the one-hot char encodings
-        # B*W x L x C
-        char_encodings, seq_lens = self.chartoken2tensor(tokens)
-        outputs, _ = self._encoder(char_encodings)  # B*W x L x E
-        # print(outputs.size())
-        outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-        return outputs
+        step = 10000
+        all_outputs = []
+        for i in tqdm(range(0, len(tokens), step)):
+            token_slice = tokens[i:i+step]
+            # create the one-hot char encodings
+            # B*W x L x C
+            char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+            outputs, _ = self._encoder(char_encodings)  # B*W x L x E
+            # print(outputs.size())
+            outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+            all_outputs.append(outputs)
+        return torch.cat(all_outputs, dim=0)
 
 class CNNWord2Vec(CharWord2Vec):
 
