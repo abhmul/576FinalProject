@@ -37,7 +37,7 @@ class VanillaWord2Vec(AWord2Vec):
             self.cuda()
 
     def lookup(self, token):
-        return self._encoder(token.index)
+        return self._encoder.weight[token.index]
 
     def lookup_tokens(self, tokens):
         return self._encoder(self.token2tensor(tokens))

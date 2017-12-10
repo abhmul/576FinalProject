@@ -24,7 +24,7 @@ parser.add_argument("--min_learning_rate", type=float, default=0.0001, help="The
                                                                             "the gradient descent.")
 parser.add_argument("--num_neg_samples", type=int, default=5, help="Number of noise (negative) words to sample per " +
                                                                     "token pair")
-parser.add_argument("--batch_size", type=int, default=10000, help="The minimum number of token pairs to pass through " +
+parser.add_argument("--batch_size", type=int, default=100, help="The minimum number of token pairs to pass through " +
                                                                   "the model before updating the weights")
 parser.add_argument("--epochs", type=int, default=5, help="Number of epochs to train the model for.")
 parser.add_argument("--window_size", type=int, default=5, help="Window size around a token that defines the context " +

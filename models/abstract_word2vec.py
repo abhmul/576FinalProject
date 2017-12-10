@@ -20,6 +20,9 @@ class AWord2Vec(nn.Module):
         super(AWord2Vec, self).__init__()
         self.embedding_size = embedding_size
         self.vocab_size = vocab_size
+        # Use this for the tensor
+        self.neg_out = None
+
 
     def token2tensor(self, tokens):
         """Helper to cast a numpy array of tokens to a torch LongTensor"""
@@ -39,10 +42,23 @@ class AWord2Vec(nn.Module):
         :return: The logits for the true and false predictions
         """
         # Quick sanity checks
-        assert input_tokens.shape[1:] == (1,)
-        assert ctx_tokens.shape[1:] == (1,)
-        assert neg_tokens.ndim == 2
-        assert neg_tokens.shape[0] == ctx_tokens.shape[0] == input_tokens.shape[0]
+        # assert input_tokens.shape[1:] == (1,)
+        # assert ctx_tokens.shape[1:] == (1,)
+        # assert neg_tokens.ndim == 2
+        # assert neg_tokens.shape[0] == ctx_tokens.shape[0] == input_tokens.shape[0]
+
+        if len(input_tokens) == 1:
+            word_emb = self.lookup(input_tokens[0])  # E
+            ctx_emb = self._decoder.weight[ctx_tokens[0].index]  # E
+            neg_embs = self._decoder.weight[J.LongTensor([token.index for token in neg_tokens])]  # N x E
+
+            pos_out = torch.dot(word_emb, ctx_emb)
+            # print(neg_embs.size())
+            # print(word_emb.size())
+            # print(self.neg_out)
+            self.neg_out = torch.matmul(neg_embs, word_emb)
+
+            return pos_out, self.neg_out
 
         word_embs = self.lookup_tokens(input_tokens)  # B x 1 x E
         ctx_embs = self._decoder(self.token2tensor(ctx_tokens))  # B x 1 x E
@@ -50,8 +66,13 @@ class AWord2Vec(nn.Module):
 
         pos_out = torch.bmm(word_embs, ctx_embs.transpose(1, 2))  # B x 1 x 1
         neg_out = torch.bmm(word_embs, neg_embs.transpose(1, 2))  # B x 1 x N
-
+        # print("NORMAL")
         return pos_out, neg_out
+
+    @staticmethod
+    def bce_with_logits(x, z):
+        # x is logit, z is label
+        return torch.clamp(x, min=0) - (x if z else 0) + torch.log(1 + torch.exp(-torch.abs(x)))
 
     @staticmethod
     def loss(true_logits, sampled_logits):
@@ -63,7 +84,7 @@ class AWord2Vec(nn.Module):
         :return: The loss of the predictions.
         """
 
-        assert true_logits.size(0) == sampled_logits.size(0)
+        # assert true_logits.size(0) == sampled_logits.size(0)
 
         # Using pytorch's implementation
         # cross-entropy(logits, labels)
@@ -81,12 +102,9 @@ class AWord2Vec(nn.Module):
         # Using tf implementation
         # true_logits = torch.clamp(true_logits, max=10)
         # sampled_logits = torch.clamp(sampled_logits, max=10)
-        # def bce_with_logits(x, z):
-        #     # x is logit, z is label
-        #     return torch.clamp(x, min=0) - (x if z else 0) + torch.log(1 + torch.exp(-torch.abs(x)))
         #
-        # true_xent = torch.sum(bce_with_logits(true_logits, True))
-        # sampled_xent = torch.sum(bce_with_logits(sampled_logits, False))
+        # true_xent = torch.sum(AWord2Vec.bce_with_logits(true_logits, True))
+        # sampled_xent = torch.sum(AWord2Vec.bce_with_logits(sampled_logits, False))
 
         # NCE-loss is the sum of the true and noise (sampled words)
         # contributions, averaged over the batch.
