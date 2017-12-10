@@ -76,7 +76,7 @@ class AWord2Vec(nn.Module):
         true_logits = torch.clamp(true_logits, max=10, min=-10)
         sampled_logits = torch.clamp(sampled_logits, max=10, min=-10)
         true_xent = torch.sum(-F.logsigmoid(true_logits))
-        sampled_xent = torch.sum(-F.logsigmoid(-sampled_logits))
+        sampled_xent = torch.sum(-F.logsigmoid(-sampled_logits)) / sampled_logits.size(1)
 
         # Using tf implementation
         # true_logits = torch.clamp(true_logits, max=10)

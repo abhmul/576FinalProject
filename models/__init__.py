@@ -1,8 +1,9 @@
-from .vanilla_word2vec import VanillaWord2Vec
-from .abstract_word2vec import AWord2Vec
+MODEL_DICT = {}
 
-# Insert all the different models into here when it is created
-MODEL_DICT = {VanillaWord2Vec.__name__: VanillaWord2Vec}
+
+def register_model_func(model_func):
+    global MODEL_DICT
+    MODEL_DICT[model_func.__name__] = model_func
 
 
 def load_model_func(model_name):
@@ -11,3 +12,7 @@ def load_model_func(model_name):
 
 def get_available_models():
     return list(MODEL_DICT.keys())
+
+
+from models.gru_word2vec import *
+from models.vanilla_word2vec import *

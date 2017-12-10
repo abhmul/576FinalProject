@@ -49,7 +49,7 @@ class Word2Vec(object):
     """
     def __init__(self, sentences=None, model_func=None, embedding_size=300, learning_rate=0.025,
                  min_learning_rate=0.0001, num_neg_samples=10, batch_size=100, epochs=5, window_size=5,
-                 dynamic_window=True, min_count=5, subsample=1e-3, seed=None):
+                 dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -86,6 +86,7 @@ class Word2Vec(object):
         self.dynamic_window = dynamic_window
         self.min_count = min_count
         self.subsample = subsample
+        self.use_adam = use_adam
 
         # Uninitialized variables
         self.tokens = None
@@ -109,6 +110,7 @@ class Word2Vec(object):
         self.tokens, self.vocab, self.char2id, self.corpus_length = self.build_vocab(sentences, self.min_count)
         self.vocab_size = len(self.tokens)
         print("Vocabulary Size:", self.vocab_size)
+        print("Character Vocabulary Size:", len(self.char2id))
         # Quick sanity check
         assert all(token.index == i for i, token in enumerate(self.tokens))
         assert len(self.tokens) == len(self.vocab) == self.vocab_size
@@ -122,10 +124,10 @@ class Word2Vec(object):
             return
 
         # Build the actual model
-        self._model = self.build_model()
+        self._model = self.build_model(sparse=not use_adam)
 
         # Optimizer
-        self._optimizer = self.build_optimizer()
+        self._optimizer = self.build_optimizer(use_adam)
 
         # Train the model
         self.train(sentences)
@@ -158,8 +160,12 @@ class Word2Vec(object):
         vocab = {token.text: token for token in tokens}
         return tokens, vocab, char2id, corpus_length
 
-    def build_optimizer(self):
-        return optim.SGD(self._model.parameters(), lr=self.learning_rate)
+    def build_optimizer(self, use_adam=False):
+        params = [param for param in self._model.parameters() if param.requires_grad]
+        if use_adam:
+            return optim.Adam(params)
+        return optim.SGD(params, lr=self.learning_rate)
+
 
     def build_sampling_distribution(self):
         total_words = float(sum(token.frequency for token in self.tokens))
@@ -189,8 +195,8 @@ class Word2Vec(object):
         unigram_probs = unigram_probs / np.sum(unigram_probs)
         return unigram_probs
 
-    def build_model(self):
-        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id)
+    def build_model(self, sparse=True):
+        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
@@ -270,8 +276,8 @@ class Word2Vec(object):
                 self._optimizer.step()
                 num_updates += 1
 
-                # Anneal the learning rate every sentence
-                if progbar_sentences.n != last_n:
+                # Anneal the learning rate every sentence if using sgd
+                if progbar_sentences.n != last_n and not self.use_adam:
                     sent_passed = epoch * self.corpus_length + progbar_sentences.n
                     lr = max(self.min_learning_rate, self.learning_rate - (sent_passed / num_sentences) * lr_diff)
                     # print(self.learning_rate)
@@ -346,7 +352,7 @@ class Word2Vec(object):
                   "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
                   "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
-                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func}
+                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}
         with open(fname + ".pkl", 'wb') as save_file:

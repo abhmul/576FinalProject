@@ -25,13 +25,14 @@ parser.add_argument("--min_learning_rate", type=float, default=0.0001, help="The
 parser.add_argument("--num_neg_samples", type=int, default=10, help="Number of noise (negative) words to sample per " +
                                                                     "token pair")
 parser.add_argument("--batch_size", type=int, default=10000, help="The minimum number of token pairs to pass through " +
-                                                                "the model before updating the weights")
+                                                                  "the model before updating the weights")
 parser.add_argument("--epochs", type=int, default=5, help="Number of epochs to train the model for.")
 parser.add_argument("--window_size", type=int, default=5, help="Window size around a token that defines the context " +
                                                                "of a token")
 parser.add_argument("--no_dynamic_window", action="store_false", help="Turns of the dynamic window on the model.")
 parser.add_argument("--min_count", type=int, default=5, help="Only keeps tokens with at least `min_count` frequency.")
 parser.add_argument("--subsample", type=float, default=1e-4, help="Subsampling constant for frequent words.")
+parser.add_argument("--use_adam", action="store_true", help="Whether or not to use adam to optimize the model.")
 
 parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
 
@@ -68,7 +69,8 @@ corpus = CorpusGen(corpus, args.test)
 w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_rate=args.learning_rate,
                min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
                batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
-               dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED)
+               dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED,
+               use_adam=args.use_adam)
 
 # Save the model
 if args.save:
