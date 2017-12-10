@@ -4,18 +4,18 @@ from operator import itemgetter
 import heapq
 from numpy.linalg import norm
 import numpy as np
+from functools import reduce
+from gensim.models import KeyedVectors
 
 class WordVecDict:
 
     def __init__(self):
-        self.word_vecs_dict = {}
-        self.all_words = []
-        self.all_vecs = []
+        self.wv = None
 
     def get_dict(self):
         return self.word_vecs_dict
 
-    def generate_dict(vocabulary):
+    def make_dict(self, dict_file_name, binary=True):
         """
         Because we don't train on a predetermined vocabulary, we need a method for generating a dictionary of words to vectors,
         given some arbitrary vocabulary. 
@@ -25,103 +25,60 @@ class WordVecDict:
 
         Perhaps let this take vocabulary filename instead?
         """
-        #TODO implement
-        #self.word_vecs_dict = generate
-
-
-        self.all_words = np.array(self.word_vecs_dict.keys())
-        self.all_vecs = np.array(self.word_vecs_dict.values()).T #why transpose?
+        self.wv = KeyedVectors.load_word2vec_format(dict_file_name, binary=binary)
 
     def load_dict(self, dict_file_name):
         """Load the word-vector dictionary from the given pickle file."""
         with open(dict_file_name, 'rb') as dict_file:
             self.word_vecs_dict = pickle.load(dict_file)
 
-        self.all_words = np.array(self.word_vecs_dict.keys())
-        self.all_vecs = np.array(self.word_vecs_dict.values()).T
+        self.all_words = np.asarray(list(self.word_vecs_dict.keys()))
 
+        vectors = list(self.word_vecs_dict.values())
+        vectors = [w for w in vectors if w.shape == (300,)]
+
+        self.all_vecs = np.asarray(vectors, dtype='float').T 
+        print(self.all_vecs.shape)
 
     def has_dict(self):
-        return self.word_vecs_dict != {} and self.word_vecs_dict != None
-
+        return self.wv != None
 
     def has_words(self, *words):
         """Determine whether all given words are in the dictionary."""
         # print(self.word_vecs_dict.keys()[:5])
         for word in words:
-            if word not in self.word_vecs_dict:
+            if word not in self.wv:
                 print(word, 'is not in the dictionary')
                 return False
         return True
 
     def get_word_vec(self, word):
-        return self.word_vecs_dict[word]
+        return self.wv[word]
 
     def get_relation_vec(self, pair):
         """Given a pair of words, return the vector representing the relation between them."""
-        vec1 = self.word_vecs_dict[pair[0]]
-        vec2 = self.word_vecs_dict[pair[1]]
+        vec1 = self.wv[pair[0]]
+        vec2 = self.wv[pair[1]]
         return vec1 - vec2
-
-    def relational_sim(self, pair1, pair2, method='cosine'):
-        """Calculate the relational similarity between two pairs of words."""
-        rel_vec1 = self.get_relation_vec(pair1)
-        rel_vec2 = self.get_relation_vec(pair2)
-        if method == 'cosine':
-            similarity = 1 - cosine(rel_vec1, rel_vec2)
-        elif method == 'euclidean':
-            similarity = 1 - euclidean(rel_vec1, rel_vec2)
-        return similarity
 
     def get_d_vec(self, word_a, word_b, word_c):
         """Given A:B::C:?, return the vector representing word D."""
-        vec_a = self.word_vecs_dict[word_a]
-        vec_b = self.word_vecs_dict[word_b]
-        vec_c = self.word_vecs_dict[word_c]
-        vec_d = vecB - vecA + vecC #are there other arithmetic operations to do?
+        vec_a = self.wv[word_a]
+        vec_b = self.wv[word_b]
+        vec_c = self.wv[word_c]
+        vec_d = vec_b - vec_a + vec_c #are there other arithmetic operations to do?
         return vec_d
 
-    def get_closest_words(self, vec, num_results=50, similarity='cosine', remove_words=[]):
-        if similarity == 'cosine':
-            vec_norm = vec / norm(vec)
-            all_sims = np.dot(vec_norm, self.all_vecs)
-        elif similarity == 'euclidean':
-            all_sims = 1 - norm(vec - self.all_vecs.T, axis = 1)
+    def get_most_similar(self, word_a, word_b, word_c, topn):
+        return self.wv.most_similar(positive=[word_c, word_b], negative=[word_a], topn=topn)
 
-        # Remove remove_words from the list of results
-        masks = [self.allWords != word for word in remove_words]
-        init_mask = np.ones(len(all_sims), dtype='bool')
-        mask = reduce(np.logical_and, masks, init_mask)
+    def get_similarity_score(self, word1, word2):
+        return self.wv.similarity(word1, word2)
 
-        # Attach each similarity to the correct word
-        word_sims = zip(self.all_words[mask], all_sims[mask])
 
-        # Get the words with the highest similarities
-        best_word_sims = heapq.nlargest(num_results, word_sims, key=itemgetter(1))
-
-        return best_word_sims
-
-    def get_analogy_completions(self, word_a, word_b, word_c, num_results=50, method='cosine', w=None):
-        """Given A:B::C:?, return the top num_results completions for the D term."""
-
-        # Get an imagined D vector and compute its distances to all words in the dictionary
-        vec_d = self.get_d_vec(word_a, word_b, word_c)
-
-        if method == 'cosine':
-            # Calculate cosine similarities between vector D and all word vectors
-            vec_d_norm = vec_d / norm(vec_d)
-            all_sims = np.dot(vec_d_norm, self.all_vecs)
-        else:
-            all_sims = 1 - norm(vec_d - self.allVecs.T, axis = 1)
-
-        # Remove words A, B, and C from the list of results
-        mask = np.logical_and(self.all_words != word_a, np.logical_and(self.all_words != word_b,
-            self.all_words != word_c))
-
-        # Attach each similarity to the correct word
-        word_sims = zip(self.allWords[mask], allSims[mask])
-
-        best_word_sims = heapq.nlargest(num_results, word_sims, key=itemgetter(1))
-
-        return best_word_sims
+    def check_top(self, top_words, key, num_to_check=3):
+        for i in range(num_to_check):
+            if key == top_words[i]:
+                return True
+        return False
 
