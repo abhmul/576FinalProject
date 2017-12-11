@@ -51,7 +51,8 @@ class Word2Vec(object):
     """
     def __init__(self, sentences=None, model_func=None, embedding_size=100, learning_rate=0.025,
                  min_learning_rate=0.0001, num_neg_samples=5, batch_size=100, epochs=5, window_size=5,
-                 dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None, save_fname=""):
+                 dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None, save_fname="",
+                 trainable_char_embeddings=False):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -89,6 +90,7 @@ class Word2Vec(object):
         self.min_count = min_count
         self.subsample = subsample
         self.use_adam = use_adam
+        self.trainable_char_embeddings=trainable_char_embeddings
 
         # Uninitialized variables
         self.tokens = None
@@ -141,8 +143,6 @@ class Word2Vec(object):
     @staticmethod
     def build_vocab(sentences, min_count):
         word_freqs = defaultdict(int)
-        char2id = {}
-        charids = 0
         corpus_length = 0
 
         # Do first pass through to collect frequencies
@@ -153,16 +153,24 @@ class Word2Vec(object):
             corpus_length += 1
             for word in sentence:
                 word_freqs[word] += 1
-                # Get all the characters in the text
-                for char in word:
-                    if char not in char2id:
-                        char2id[char] = charids
-                        charids += 1
+
+        char2id = {}
+        charids = 0
+        charset = set()
+        print("WARNING: The character and word id setup is no longer compatible with older models!")
+        for word in word_freqs:
+            # Get all the characters in the text
+            for char in word:
+                charset.add(char)
+        for char in sorted(charset):
+            char2id[char] = charids
+            charids += 1
 
         # The vocabulary is mapped to id with most frequent being 1
-        id2word = sorted((w for w in word_freqs if word_freqs[w] >= min_count), key=lambda k: word_freqs[k], reverse=True)
+        id2word = sorted((w for w in word_freqs if word_freqs[w] >= min_count), key=lambda k: (-word_freqs[k], k))
         print(id2word[:100])
         print(id2word[-100:])
+        print(list(sorted([char for char in char2id], key=lambda k: char2id[k])))
         tokens = np.array([Token(index=i, text=w, frequency=word_freqs[w]) for i, w in enumerate(id2word)])
         # Create a hashable set of the tokens
         vocab = {token.text: token for token in tokens}
@@ -206,7 +214,7 @@ class Word2Vec(object):
         return unigram_probs
 
     def build_model(self, sparse=True):
-        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse)
+        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse, trainable_char_embeddings=self.trainable_char_embeddings)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
@@ -465,7 +473,8 @@ class Word2Vec(object):
                   "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
                   "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
-                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam}
+                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam,
+                  "trainable_char_embeddings": self.trainable_char_embeddings}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
                       "char2id": self.char2id,
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}

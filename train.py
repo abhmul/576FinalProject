@@ -36,6 +36,8 @@ parser.add_argument("--use_adam", action="store_true", help="Whether or not to u
 
 parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
 
+parser.add_argument("--trainable_char_embeddings", action="store_true", help="Makes the characters trainable.")
+
 # Test arguments
 parser.add_argument("-t", "--test", type=float, default=float('inf'),
                     help="Runs the train script only using this many documents from the dataset.")
@@ -71,7 +73,7 @@ w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_
                min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
                batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
                dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED,
-               use_adam=args.use_adam, save_fname=args.save)
+               use_adam=args.use_adam, save_fname=args.save, trainable_char_embeddings=args.trainable_char_embeddings)
 
 # Save the model
 if args.save:

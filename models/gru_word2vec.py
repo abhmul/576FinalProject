@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 class CharWord2Vec(AWord2Vec):
 
-    def __init__(self, vocab_size, embedding_size, char2id, sparse=False, **kwargs):
+    def __init__(self, vocab_size, embedding_size, char2id, sparse=False, trainable_char_embeddings=False, **kwargs):
         """
         Initializes a pytorch word2vec module.
 
@@ -29,9 +29,13 @@ class CharWord2Vec(AWord2Vec):
 
         # Make a one-hot encoder
         self._char_encoder = nn.Embedding(self.num_chars+1, self.num_chars, padding_idx=self.num_chars)
-        torch.diag(torch.ones(self.num_chars), out=self._char_encoder.weight.data[:-1])
-        # Freeze the encodings
-        self._char_encoder.weight.requires_grad = False
+        if trainable_char_embeddings:
+            print("Training character embeddings")
+            self._char_encoder.weight.data.uniform_(-0.5 / self.num_chars, 0.5 / self.num_chars)
+        else:
+            torch.diag(torch.ones(self.num_chars), out=self._char_encoder.weight.data[:-1])
+            # Freeze the encodings
+            self._char_encoder.weight.requires_grad = False
 
         # Use sparse for more memory efficient computations
         # Note that only SGD will work with sparse embedding layers on a GPU
@@ -73,7 +77,7 @@ class GRUWord2Vec(CharWord2Vec):
     should not be trained directly, but rather through the `Word2Vec` class below.
     """
 
-    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=False, sparse=False, **kwargs):
+    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=False, sparse=False, trainable_char_embeddings=False, **kwargs):
         """
         Initializes a pytorch word2vec module.
 
@@ -82,7 +86,8 @@ class GRUWord2Vec(CharWord2Vec):
         :param char2id: A mapping of each character in the vocabulary to its respective id
         :param bidirectional: Whether or not to make the GRU bidirectional
         """
-        super(GRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse)
+        super(GRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse,
+                                          trainable_char_embeddings=trainable_char_embeddings, **kwargs)
         self.bidirectional = bidirectional
 
         self._encoder = nn.GRU(self.num_chars, embedding_size // 2 if bidirectional else embedding_size, 1, batch_first=True,
@@ -94,50 +99,71 @@ class GRUWord2Vec(CharWord2Vec):
     def lookup_tokens(self, tokens):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
-        all_outputs = []
         step = 10000
-        for i in tqdm(range(0, len(tokens), step)):
-            token_slice = tokens[i:i+step]
-            # create the one-hot char encodings
-            # B*W x L x C
-            char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+        if tokens.shape[0] > step:
+            all_outputs = []
+
+            for i in tqdm(range(0, len(tokens), step)):
+                token_slice = tokens[i:i+step]
+                # create the one-hot char encodings
+                # B*W x L x C
+                char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+                outputs, _ = self._encoder(char_encodings)
+                new_outputs = J.zeros(outputs.size(0), outputs.size(2))
+                # Fill it in
+                for seq_len in seq_lens:
+                    new_outputs = outputs[:, seq_len-1]
+                outputs = new_outputs.view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+                all_outputs.append(outputs)
+                # Select the last encoding and reshape into B x W
+                # outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
+            return torch.cat(all_outputs, dim=0)
+
+        else:
+            char_encodings, seq_lens = self.chartoken2tensor(tokens)
             outputs, _ = self._encoder(char_encodings)
             new_outputs = J.zeros(outputs.size(0), outputs.size(2))
             # Fill it in
             for seq_len in seq_lens:
-                new_outputs = outputs[:, seq_len-1]
-            outputs = new_outputs.view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
-            all_outputs.append(outputs)
-            # Select the last encoding and reshape into B x W
-            # outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-        return torch.cat(all_outputs, dim=0)
+                new_outputs = outputs[:, seq_len - 1]
+            outputs = new_outputs.view(tokens.shape[0], tokens.shape[1], self.embedding_size)
+            return outputs
 
 
 class PoolGRUWord2Vec(GRUWord2Vec):
 
-    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=True, sparse=True, **kwargs):
-        super(PoolGRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, bidirectional, sparse=sparse, **kwargs)
+    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=True, sparse=True, trainable_char_embeddings=False, **kwargs):
+        super(PoolGRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, bidirectional, sparse=sparse,
+                                              trainable_char_embeddings=trainable_char_embeddings, **kwargs)
 
     def lookup_tokens(self, tokens):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
         step = 10000
-        all_outputs = []
-        for i in tqdm(range(0, len(tokens), step)):
-            token_slice = tokens[i:i+step]
-            # create the one-hot char encodings
-            # B*W x L x C
-            char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+        if tokens.shape[0] > step:
+            all_outputs = []
+            for i in tqdm(range(0, len(tokens), step)):
+                token_slice = tokens[i:i+step]
+                # create the one-hot char encodings
+                # B*W x L x C
+                char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+                outputs, _ = self._encoder(char_encodings)  # B*W x L x E
+                # print(outputs.size())
+                outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+                all_outputs.append(outputs)
+            return torch.cat(all_outputs, dim=0)
+
+        else:
+            char_encodings, seq_lens = self.chartoken2tensor(tokens)
             outputs, _ = self._encoder(char_encodings)  # B*W x L x E
             # print(outputs.size())
-            outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
-            all_outputs.append(outputs)
-        return torch.cat(all_outputs, dim=0)
+            outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
+            return outputs
 
 class CNNWord2Vec(CharWord2Vec):
 
-    def __init__(self, vocab_size, embedding_size, char2id, kernel_size=3, sparse=True, **kwargs):
-        super(CNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse)
+    def __init__(self, vocab_size, embedding_size, char2id, kernel_size=3, sparse=True, trainable_char_embeddings=False, **kwargs):
+        super(CNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse, trainable_char_embeddings=trainable_char_embeddings)
         self._encoder = nn.Conv1d(self.num_chars, self.embedding_size, kernel_size=kernel_size)
 
         if J.use_cuda:
