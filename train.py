@@ -33,6 +33,9 @@ parser.add_argument("--no_dynamic_window", action="store_false", help="Turns of 
 parser.add_argument("--min_count", type=int, default=5, help="Only keeps tokens with at least `min_count` frequency.")
 parser.add_argument("--subsample", type=float, default=0.001, help="Subsampling constant for frequent words.")
 parser.add_argument("--use_adam", action="store_true", help="Whether or not to use adam to optimize the model.")
+parser.add_argument("--gensim_decoders", default="", help="Path to gensim w2v file for decoders. If loaded will " +
+                                                          "freeze the decoders")
+parser.add_argument("--num_encoder_layers", default=1, type=int, help="Number of encoding layers to use")
 
 parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
 
@@ -73,7 +76,8 @@ w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_
                min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
                batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
                dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED,
-               use_adam=args.use_adam, save_fname=args.save, trainable_char_embeddings=args.trainable_char_embeddings)
+               use_adam=args.use_adam, save_fname=args.save, trainable_char_embeddings=args.trainable_char_embeddings,
+               gensim_decoders=args.gensim_decoders, num_encoder_layers=args)
 
 # Save the model
 if args.save:

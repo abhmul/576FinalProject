@@ -10,7 +10,7 @@ import pyjet.backend as J
 
 class AWord2Vec(nn.Module):
 
-    def __init__(self, vocab_size, embedding_size):
+    def __init__(self, vocab_size, embedding_size, sparse=True):
         """
         Initializes an abstract pytorch word2vec module.
 
@@ -22,6 +22,14 @@ class AWord2Vec(nn.Module):
         self.vocab_size = vocab_size
         # Use this for the tensor
         self.neg_out = None
+
+        # Use sparse for more memory efficient computations
+        # Note that only SGD will work with sparse embedding layers on a GPU
+        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
+        self._decoder.weight.data.zero_()
+
+        if J.use_cuda:
+            self.cuda()
 
 
     def token2tensor(self, tokens):
@@ -47,7 +55,7 @@ class AWord2Vec(nn.Module):
         # assert neg_tokens.ndim == 2
         # assert neg_tokens.shape[0] == ctx_tokens.shape[0] == input_tokens.shape[0]
 
-        if len(input_tokens) == 1:
+        if len(input_tokens) == 1 and input_tokens.ndim != 2:
             word_emb = self.lookup(input_tokens[0])  # E
             ctx_emb = self._decoder.weight[ctx_tokens[0].index]  # E
             neg_embs = self._decoder.weight[J.LongTensor([token.index for token in neg_tokens])]  # N x E
@@ -117,6 +125,19 @@ class AWord2Vec(nn.Module):
     def predict(logits):
         """Defines how an actual prediction is computed using the logits."""
         return F.sigmoid(logits)
+
+    def set_decoders_from_numpy(self, np_decoders):
+        assert np_decoders.shape == (self.vocab_size, self.embedding_size)
+        tensor = torch.from_numpy(np_decoders)
+        if J.use_cuda:
+            tensor = tensor.cuda()
+            print("Converting decoder numpy to cuda tensor of size", tensor.size())
+        self._decoder.weight.data = tensor
+        print("Set decoders from numpy")
+
+    def freeze_decoders(self):
+        self._decoder.weight.requires_grad = False
+        print("Froze decoders")
 
     def lookup(self, token):
         raise NotImplementedError()

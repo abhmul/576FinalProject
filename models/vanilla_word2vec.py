@@ -22,14 +22,12 @@ class VanillaWord2Vec(AWord2Vec):
         :param vocab_size: The size of the vocabulary of the corpus
         :param embedding_size: The dimension of the embeddings
         """
-        super(VanillaWord2Vec, self).__init__(vocab_size, embedding_size)
+        super(VanillaWord2Vec, self).__init__(vocab_size, embedding_size, sparse=sparse)
 
         # Use sparse for more memory efficient computations
         # Note that only SGD will work with sparse embedding layers on a GPU
         self._encoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
         self._encoder.weight.data.uniform_(-0.5 / self.embedding_size, 0.5 / self.embedding_size)
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
-        self._decoder.weight.data.zero_()
 
         self._embedding_norms = None
 

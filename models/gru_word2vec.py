@@ -23,7 +23,7 @@ class CharWord2Vec(AWord2Vec):
         :param char2id: A mapping of each character in the vocabulary to its respective id
         :param bidirectional: Whether or not to make the GRU bidirectional
         """
-        super(CharWord2Vec, self).__init__(vocab_size, embedding_size)
+        super(CharWord2Vec, self).__init__(vocab_size, embedding_size, sparse=sparse)
         self.char2id = char2id
         self.num_chars = len(self.char2id)
 
@@ -37,11 +37,6 @@ class CharWord2Vec(AWord2Vec):
             # Freeze the encodings
             self._char_encoder.weight.requires_grad = False
 
-        # Use sparse for more memory efficient computations
-        # Note that only SGD will work with sparse embedding layers on a GPU
-        self._decoder = nn.Embedding(self.vocab_size, self.embedding_size, sparse=sparse)
-        self._decoder.weight.data.zero_()
-
         self._embedding_norms = None
 
         if J.use_cuda:
@@ -49,7 +44,7 @@ class CharWord2Vec(AWord2Vec):
 
     def chartoken2tensor(self, tokens):
         """Helper to cast a list of tokens to a torch LongTensor"""
-        assert tokens.ndim == 2
+        assert tokens.ndim == 2, (tokens.ndim, tokens.shape)
 
         charids = [[self.char2id[char] for char in token.text] for token in tokens.flatten()]
         seq_lens = [len(charid_array) for charid_array in charids]

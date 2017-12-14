@@ -14,6 +14,8 @@ import time
 
 from tqdm import tqdm
 
+from gensim.models.word2vec import Word2Vec as gensim_Word2Vec
+
 
 class Token(object):
     """
@@ -52,7 +54,7 @@ class Word2Vec(object):
     def __init__(self, sentences=None, model_func=None, embedding_size=100, learning_rate=0.025,
                  min_learning_rate=0.0001, num_neg_samples=5, batch_size=100, epochs=5, window_size=5,
                  dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None, save_fname="",
-                 trainable_char_embeddings=False):
+                 trainable_char_embeddings=False, gensim_decoders=""):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -132,6 +134,8 @@ class Word2Vec(object):
         # Build the actual model
         self._model = self.build_model(sparse=(not use_adam))
         print("Built", self._model.__class__.__name__, "with", "sparse" if not use_adam else "dense", "embeddings.")
+        if gensim_decoders:
+            self.load_decoders_from_gensim(gensim_decoders)
 
         # Optimizer
         self._optimizer = self.build_optimizer(use_adam)
@@ -480,6 +484,17 @@ class Word2Vec(object):
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}
         with open(fname + ".pkl", 'wb') as save_file:
             pickle.dump((params, attributes), save_file)
+
+    def load_decoders_from_gensim(self, gensim_w2v_fname):
+        gensim_w2v = gensim_Word2Vec.load(gensim_w2v_fname)
+        # Get the tokens indexes in gensim's vocabulary
+        gensim_inds = [gensim_w2v.wv.vocab[token.text].index for token in self.tokens]
+        # Get the decoder numpy array
+        decoders = gensim_w2v.syn1neg[gensim_inds]
+        assert not np.all(decoders == 0.)
+        self._model.set_decoders_from_numpy(decoders)
+        self._model.freeze_decoders()
+
 
     @staticmethod
     def load(fname, sentences=None, min_count=5):

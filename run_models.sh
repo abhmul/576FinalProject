@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 
-python3 train.py -c text8 -m GRUWord2Vec -s model_files/text8_gru --batch_size 500  --use_adam --trainable_char_embeddings
-python3 train.py -c text8 -m PoolGRUWord2Vec -s model_files/text8_pool_gru --batch_size 500 --use_adam --trainable_char_embeddings
-python3 train.py -c text8 -m CNNWord2Vec -s model_files/text8_cnn --batch_size 500 --use_adam --trainable_char_embeddings
+## This will run the models using a gensim decoder
+python3 train.py -c text8 -m GRUWord2Vec -s model_files/text8_gru_char_emb_gensim_decoders --batch_size 500  --use_adam --trainable_char_embeddings --gensim_decoders gensim_word2vec.w2v
+python3 train.py -c text8 -m PoolGRUWord2Vec -s model_files/text8_pool_gru_char_emb_gensim_decoders --batch_size 500 --use_adam --trainable_char_embeddings --gensim_decoders gensim_word2vec.w2v
+python3 train.py -c text8 -m CNNWord2Vec -s model_files/text8_cnn_char_emb_gensim_decoders --batch_size 500 --use_adam --trainable_char_embeddings --gensim_decoders gensim_word2vec.w2v
 
-python3 train.py -c text8 -m GRUWord2Vec -s model_files/text8_gru_no_adam --batch_size 500 --trainable_char_embeddings
-python3 train.py -c text8 -m PoolGRUWord2Vec -s model_files/text8_pool_gru_no_adam --batch_size 500 --trainable_char_embeddings
+## This will run the models with trainable character embeddings
+#python3 train.py -c text8 -m GRUWord2Vec -s model_files/text8_gru_char_emb --batch_size 500  --use_adam --trainable_char_embeddings
+#python3 train.py -c text8 -m PoolGRUWord2Vec -s model_files/text8_pool_gru_char_emb --batch_size 500 --use_adam --trainable_char_embeddings
+#python3 train.py -c text8 -m CNNWord2Vec -s model_files/text8_cnn_char_emb --batch_size 500 --use_adam --trainable_char_embeddings
+#
+#python3 train.py -c text8 -m GRUWord2Vec -s model_files/text8_gru_no_adam --batch_size 500 --trainable_char_embeddings
+#python3 train.py -c text8 -m PoolGRUWord2Vec -s model_files/text8_pool_gru_no_adam --batch_size 500 --trainable_char_embeddings
 
 
 
