@@ -263,3 +263,7 @@ data/
 \.tmp/
 
 text8
+
+argparse
+
+*.ipynb
