@@ -1,5 +1,6 @@
 import argparse
 
+import gensim
 from gensim.models.word2vec import Text8Corpus
 
 import models
@@ -35,11 +36,16 @@ parser.add_argument("--subsample", type=float, default=0.001, help="Subsampling 
 parser.add_argument("--use_adam", action="store_true", help="Whether or not to use adam to optimize the model.")
 parser.add_argument("--gensim_decoders", default="", help="Path to gensim w2v file for decoders. If loaded will " +
                                                           "freeze the decoders")
+
+# Pytorch model specific stuff
 parser.add_argument("--num_encoder_layers", default=1, type=int, help="Number of encoding layers to use")
-
-parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
-
+parser.add_argument("--linear_size", default=0, type=int, help="Size of the linear layer to use. Setting to 0 makes" +
+                                                               "it inactive.")
 parser.add_argument("--trainable_char_embeddings", action="store_true", help="Makes the characters trainable.")
+parser.add_argument("--use_gru", action="store_true", help="Uses a GRU instead of an lstm")
+
+# Other arguments
+parser.add_argument("-s", "--save", default="", help="File path to save the trained model to.")
 
 # Test arguments
 parser.add_argument("-t", "--test", type=float, default=float('inf'),
@@ -47,12 +53,11 @@ parser.add_argument("-t", "--test", type=float, default=float('inf'),
 args = parser.parse_args()
 
 # Get the model factory
-model_func = models.load_model_func(args.model)
+model_func = models.load_model_func(args.model, num_ncoder_layers=args.num_encoder_layers, linear_size=args.linear_size,
+                                    trainable_char_embeddings=args.trainable_char_embeddings, use_gru=args.use_gru)
 
 # Get corpus
 corpus = Text8Corpus(args.corpus)
-                     #, lemmatize=False, dictionary={}, token_min_len=args.token_min_len,
-                    #token_max_len=args.token_max_len)
 
 
 # Used for regeneration purposes
@@ -76,8 +81,7 @@ w2v = Word2Vec(corpus, model_func, embedding_size=args.embedding_size, learning_
                min_learning_rate=args.min_learning_rate, num_neg_samples=args.num_neg_samples,
                batch_size=args.batch_size, epochs=args.epochs, window_size=args.window_size,
                dynamic_window=args.no_dynamic_window, min_count=args.min_count, subsample=args.subsample, seed=SEED,
-               use_adam=args.use_adam, save_fname=args.save, trainable_char_embeddings=args.trainable_char_embeddings,
-               gensim_decoders=args.gensim_decoders, num_encoder_layers=args)
+               use_adam=args.use_adam, save_fname=args.save, gensim_decoders=args.gensim_decoders)
 
 # Save the model
 if args.save:

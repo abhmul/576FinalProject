@@ -54,7 +54,7 @@ class Word2Vec(object):
     def __init__(self, sentences=None, model_func=None, embedding_size=100, learning_rate=0.025,
                  min_learning_rate=0.0001, num_neg_samples=5, batch_size=100, epochs=5, window_size=5,
                  dynamic_window=True, min_count=5, subsample=1e-3, use_adam=False, seed=None, save_fname="",
-                 trainable_char_embeddings=False, gensim_decoders=""):
+                 gensim_decoders=""):
         """
         Initialize the model from an iterable of `sentences`. Each sentence is a
         list of words (unicode strings) that will be used for training.
@@ -79,6 +79,7 @@ class Word2Vec(object):
         :param subsample: Subsampling factor to reduce sampling of frequent words in batches
         :param seed: The seed for the random generator. Note that this is only for the python and numpy random
             generators and does not seed pytorch. As of now, pytorch is not being seeded
+        :param gensim_decoder: Preloads gensim decoders and freezes them in the model.
         """
 
         self.embedding_size = embedding_size
@@ -92,7 +93,6 @@ class Word2Vec(object):
         self.min_count = min_count
         self.subsample = subsample
         self.use_adam = use_adam
-        self.trainable_char_embeddings=trainable_char_embeddings
 
         # Uninitialized variables
         self.tokens = None
@@ -218,7 +218,7 @@ class Word2Vec(object):
         return unigram_probs
 
     def build_model(self, sparse=True):
-        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse, trainable_char_embeddings=self.trainable_char_embeddings)
+        return self._model_func(self.vocab_size, self.embedding_size, char2id=self.char2id, sparse=sparse)
 
     def generate_sg_batch(self, sentences):
         token_pairs = []
@@ -477,8 +477,7 @@ class Word2Vec(object):
                   "min_learning_rate": self.min_learning_rate, "num_neg_samples": self.num_neg_samples,
                   "batch_size": self.batch_size, "epochs": self.epochs, "window_size": self.window_size,
                   "dynamic_window": self.dynamic_window, "min_count": self.min_count, "subsample": self.subsample,
-                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam,
-                  "trainable_char_embeddings": self.trainable_char_embeddings}
+                  "seed": random.randint(0, 2 ** 32), "model_func": self._model_func, "use_adam": self.use_adam}
         attributes = {"vocab": self.vocab, "corpus_length": self.corpus_length, "vocab_size": self.vocab_size,
                       "char2id": self.char2id,
                       "model_saved": self._model is not None, "numpy_saved": self.tokens is not None}

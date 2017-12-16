@@ -14,6 +14,12 @@ from tqdm import tqdm
 
 class CharWord2Vec(AWord2Vec):
 
+    def lookup_tokens(self, tokens):
+        raise NotImplementedError()
+
+    def similarities(self, tensor):
+        pass
+
     def __init__(self, vocab_size, embedding_size, char2id, sparse=False, trainable_char_embeddings=False, **kwargs):
         """
         Initializes a pytorch word2vec module.
@@ -63,8 +69,7 @@ class CharWord2Vec(AWord2Vec):
         return self.lookup_tokens(np.array([[token]]))
 
 
-
-class GRUWord2Vec(CharWord2Vec):
+class RNNWord2Vec(CharWord2Vec):
     """
     Class that represents the vanilla word2vec module. We'll swap this out with our experimental modules.
 
@@ -72,7 +77,8 @@ class GRUWord2Vec(CharWord2Vec):
     should not be trained directly, but rather through the `Word2Vec` class below.
     """
 
-    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=False, sparse=False, trainable_char_embeddings=False, **kwargs):
+    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=False, sparse=False,
+                 trainable_char_embeddings=True, num_encoder_layers=1, linear_size=0, gru=False, **kwargs):
         """
         Initializes a pytorch word2vec module.
 
@@ -80,13 +86,24 @@ class GRUWord2Vec(CharWord2Vec):
         :param embedding_size: The dimension of the embeddings
         :param char2id: A mapping of each character in the vocabulary to its respective id
         :param bidirectional: Whether or not to make the GRU bidirectional
+        :param linear_size: The size of the linear layer after the rnn. Should be 0 if no linear layer
+
         """
-        super(GRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse,
+        super(RNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse,
                                           trainable_char_embeddings=trainable_char_embeddings, **kwargs)
         self.bidirectional = bidirectional
-
-        self._encoder = nn.GRU(self.num_chars, embedding_size // 2 if bidirectional else embedding_size, 1, batch_first=True,
-                               bidirectional=self.bidirectional)
+        self.hidden = embedding_size if linear_size == 0 else linear_size
+        self.num_recurrent_layers = num_encoder_layers
+        rnn_constructor = nn.GRU if gru else nn.LSTM
+        print("Using", num_encoder_layers, "layer", self.hidden, "neuron", rnn_constructor.__name__, "as encoder")
+        self._rnn = rnn_constructor(self.num_chars, self.hidden // 2 if bidirectional else self.hidden,
+                                    num_encoder_layers, batch_first=True, bidirectional=self.bidirectional)
+        if linear_size:
+            linear = nn.Linear(self.hidden, self.embedding_size)
+            print("Using linear layer of size", self.hidden, "on top of encoder")
+            self._encoder = torch.nn.Sequential(self._rnn, linear)
+        else:
+            self._encoder = self._rnn
 
         if J.use_cuda:
             self.cuda()
@@ -125,11 +142,14 @@ class GRUWord2Vec(CharWord2Vec):
             return outputs
 
 
-class PoolGRUWord2Vec(GRUWord2Vec):
+class PoolRNNWord2Vec(RNNWord2Vec):
 
-    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=True, sparse=True, trainable_char_embeddings=False, **kwargs):
-        super(PoolGRUWord2Vec, self).__init__(vocab_size, embedding_size, char2id, bidirectional, sparse=sparse,
-                                              trainable_char_embeddings=trainable_char_embeddings, **kwargs)
+    def __init__(self, vocab_size, embedding_size, char2id, bidirectional=True, sparse=False,
+                 trainable_char_embeddings=False, num_encoder_layers=1, linear_size=0, gru=False, **kwargs):
+        super(PoolRNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, bidirectional, sparse=sparse,
+                                              trainable_char_embeddings=trainable_char_embeddings,
+                                              num_encoder_layers=num_encoder_layers, linear_size=linear_size,
+                                              gru=gru, **kwargs)
 
     def lookup_tokens(self, tokens):
         # Shape of tokens is B x W
@@ -155,11 +175,26 @@ class PoolGRUWord2Vec(GRUWord2Vec):
             outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
             return outputs
 
+
 class CNNWord2Vec(CharWord2Vec):
 
-    def __init__(self, vocab_size, embedding_size, char2id, kernel_size=3, sparse=True, trainable_char_embeddings=False, **kwargs):
-        super(CNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse, trainable_char_embeddings=trainable_char_embeddings)
-        self._encoder = nn.Conv1d(self.num_chars, self.embedding_size, kernel_size=kernel_size)
+    def __init__(self, vocab_size, embedding_size, char2id, kernel_size=3, sparse=False,
+                 trainable_char_embeddings=False, num_encoder_layers=1, linear_size=0, **kwargs):
+        super(CNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, sparse=sparse,
+                                          trainable_char_embeddings=trainable_char_embeddings)
+        self.hidden = embedding_size if linear_size == 0 else linear_size
+        self.num_convolutional_layers = num_encoder_layers
+        padding = (kernel_size - 1) // 2
+        self._cnn = nn.Sequential(
+            *(nn.Conv1d(self.num_chars, self.hidden, kernel_size=kernel_size, padding=padding) for _ in
+              range(self.num_convolutional_layers)))
+        print("Using", num_encoder_layers, "layer", self.hidden, "neuron CNN", "as encoder")
+        if linear_size:
+            linear = nn.Linear(self.hidden, self.embedding_size)
+            print("Using linear layer of size", self.hidden, "on top of encoder")
+            self._encoder = torch.nn.Sequential(self._cnn, linear)
+        else:
+            self._encoder = self._cnn
 
         if J.use_cuda:
             self.cuda()
@@ -175,6 +210,7 @@ class CNNWord2Vec(CharWord2Vec):
         outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
         return outputs
 
-register_model_func(GRUWord2Vec)
-register_model_func(PoolGRUWord2Vec)
+
+register_model_func(RNNWord2Vec)
+register_model_func(PoolRNNWord2Vec)
 register_model_func(CNNWord2Vec)
