@@ -96,14 +96,13 @@ class RNNWord2Vec(CharWord2Vec):
         self.num_recurrent_layers = num_encoder_layers
         rnn_constructor = nn.GRU if gru else nn.LSTM
         print("Using", num_encoder_layers, "layer", self.hidden, "neuron", rnn_constructor.__name__, "as encoder")
-        self._rnn = rnn_constructor(self.num_chars, self.hidden // 2 if bidirectional else self.hidden,
-                                    num_encoder_layers, batch_first=True, bidirectional=self.bidirectional)
+        self._encoder = rnn_constructor(self.num_chars, self.hidden // 2 if bidirectional else self.hidden,
+                                        num_encoder_layers, batch_first=True, bidirectional=self.bidirectional)
         if linear_size:
-            linear = nn.Linear(self.hidden, self.embedding_size)
+            self.linear = nn.Linear(self.hidden, self.embedding_size)
             print("Using linear layer of size", self.hidden, "on top of encoder")
-            self._encoder = torch.nn.Sequential(self._rnn, linear)
         else:
-            self._encoder = self._rnn
+            self.linear = lambda x: x
 
         if J.use_cuda:
             self.cuda()
@@ -125,11 +124,11 @@ class RNNWord2Vec(CharWord2Vec):
                 # Fill it in
                 for seq_len in seq_lens:
                     new_outputs = outputs[:, seq_len-1]
-                outputs = new_outputs.view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+                outputs = new_outputs.view(token_slice.shape[0], token_slice.shape[1], self.hidden)
                 all_outputs.append(outputs)
                 # Select the last encoding and reshape into B x W
                 # outputs = outputs[:, seq_lens-1, :].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-            return torch.cat(all_outputs, dim=0)
+            return self.linear(torch.cat(all_outputs, dim=0))
 
         else:
             char_encodings, seq_lens = self.chartoken2tensor(tokens)
@@ -138,8 +137,8 @@ class RNNWord2Vec(CharWord2Vec):
             # Fill it in
             for seq_len in seq_lens:
                 new_outputs = outputs[:, seq_len - 1]
-            outputs = new_outputs.view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-            return outputs
+            outputs = new_outputs.view(tokens.shape[0], tokens.shape[1], self.hidden)
+            return self.linear(outputs)
 
 
 class PoolRNNWord2Vec(RNNWord2Vec):
@@ -164,16 +163,16 @@ class PoolRNNWord2Vec(RNNWord2Vec):
                 char_encodings, seq_lens = self.chartoken2tensor(token_slice)
                 outputs, _ = self._encoder(char_encodings)  # B*W x L x E
                 # print(outputs.size())
-                outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.embedding_size)
+                outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.hidden)
                 all_outputs.append(outputs)
-            return torch.cat(all_outputs, dim=0)
+            return self.linear(torch.cat(all_outputs, dim=0))
 
         else:
             char_encodings, seq_lens = self.chartoken2tensor(tokens)
             outputs, _ = self._encoder(char_encodings)  # B*W x L x E
             # print(outputs.size())
-            outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-            return outputs
+            outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.hidden)
+            return self.linear(outputs)
 
 
 class CNNWord2Vec(CharWord2Vec):
@@ -185,16 +184,15 @@ class CNNWord2Vec(CharWord2Vec):
         self.hidden = embedding_size if linear_size == 0 else linear_size
         self.num_convolutional_layers = num_encoder_layers
         padding = (kernel_size - 1) // 2
-        self._cnn = nn.Sequential(
+        self._encoder = nn.Sequential(
             *(nn.Conv1d(self.num_chars, self.hidden, kernel_size=kernel_size, padding=padding) for _ in
               range(self.num_convolutional_layers)))
         print("Using", num_encoder_layers, "layer", self.hidden, "neuron CNN", "as encoder")
         if linear_size:
-            linear = nn.Linear(self.hidden, self.embedding_size)
+            self.linear = nn.Linear(self.hidden, self.embedding_size)
             print("Using linear layer of size", self.hidden, "on top of encoder")
-            self._encoder = torch.nn.Sequential(self._cnn, linear)
         else:
-            self._encoder = self._cnn
+            self.linear = lambda x: x
 
         if J.use_cuda:
             self.cuda()
@@ -207,8 +205,8 @@ class CNNWord2Vec(CharWord2Vec):
         char_encodings, seq_lens = self.chartoken2tensor(tokens)
         outputs = self._encoder(char_encodings.transpose(1, 2)).transpose(1, 2)  # B*W x L x E
         # print(outputs.size())
-        outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.embedding_size)
-        return outputs
+        outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.hidden)
+        return self.linear(outputs)
 
 
 register_model_func(RNNWord2Vec)
