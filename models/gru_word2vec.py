@@ -185,9 +185,15 @@ class CNNWord2Vec(CharWord2Vec):
         self.hidden = embedding_size if linear_size == 0 else linear_size
         self.num_convolutional_layers = num_encoder_layers
         padding = (kernel_size - 1) // 2
-        self._encoder = nn.Sequential(
-            *(nn.Conv1d(self.num_chars, self.hidden, kernel_size=kernel_size, padding=padding) for _ in
-              range(self.num_convolutional_layers)))
+        # Build the encoder
+        self._encoder = nn.Sequential()
+        self._encoder.add_module(name="Conv0", module=nn.Conv1d(self.num_chars, self.hidden, kernel_size=kernel_size, padding=padding))
+        self._encoder.add_module(name="ReLU0", module=nn.ReLU())
+        for i in range(self.num_convolutional_layers - 1):
+            self._encoder.add_module(name="Conv{}".format(i+1),
+                                     module=nn.Conv1d(self.hidden, self.hidden, kernel_size=kernel_size,
+                                                      padding=padding))
+            self._encoder.add_module(name="ReLU{}".format(i+1), module=nn.ReLU())
         print("Using", num_encoder_layers, "layer", self.hidden, "neuron CNN", "as encoder")
         if linear_size:
             self.linear = nn.Linear(self.hidden, self.embedding_size)

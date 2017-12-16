@@ -11,10 +11,14 @@ cd ${PROJECT_ROOT}
 
 echo ${STRING}
 
+# This is for the multilayer lstms
+${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm2_512_char_emb_gensim_decoders -e vectors/text8_lstm_char_emb_gensim_decoders.txt
+${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_pool_lstm2_512_char_emb_gensim_decoders -e vectors/text8_pool_lstm_char_emb_gensim_decoders.txt
+
 # This is for the models with gensim decoders
-${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm_char_emb_gensim_decoders -e vectors/text8_lstm_char_emb_gensim_decoders.txt
-${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_pool_lstm_char_emb_gensim_decoders -e vectors/text8_pool_lstm_char_emb_gensim_decoders.txt
-${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_cnn_char_emb_gensim_decoders -e vectors/text8_cnn_char_emb_gensim_decoders.txt
+#${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm_char_emb_gensim_decoders -e vectors/text8_lstm_char_emb_gensim_decoders.txt
+#${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_pool_lstm_char_emb_gensim_decoders -e vectors/text8_pool_lstm_char_emb_gensim_decoders.txt
+#${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_cnn_char_emb_gensim_decoders -e vectors/text8_cnn_char_emb_gensim_decoders.txt
 
 
 
