@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 class CharWord2Vec(AWord2Vec):
 
-    def lookup_tokens(self, tokens):
+    def lookup_tokens(self, tokens, volatile=False):
         raise NotImplementedError()
 
     def similarities(self, tensor):
@@ -48,7 +48,7 @@ class CharWord2Vec(AWord2Vec):
         if J.use_cuda:
             self.cuda()
 
-    def chartoken2tensor(self, tokens):
+    def chartoken2tensor(self, tokens, volatile=False):
         """Helper to cast a list of tokens to a torch LongTensor"""
         assert tokens.ndim == 2, (tokens.ndim, tokens.shape)
 
@@ -58,7 +58,8 @@ class CharWord2Vec(AWord2Vec):
         max_seq_len = max(seq_lens)
         # B*W x L
         charids = Variable(J.LongTensor(
-            [charid_array + [self.num_chars] * (max_seq_len - len(charid_array)) for charid_array in charids]))
+            [charid_array + [self.num_chars] * (max_seq_len - len(charid_array)) for charid_array in charids]),
+            volatile=volatile)
         # Get the one hot encodings
         onehots = self._char_encoder(charids)  # B*W x L x C
         assert onehots.size(0) == tokens.shape[0] * tokens.shape[1]
@@ -107,10 +108,10 @@ class RNNWord2Vec(CharWord2Vec):
         if J.use_cuda:
             self.cuda()
 
-    def lookup_tokens(self, tokens):
+    def lookup_tokens(self, tokens, volatile=False):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
-        step = 10000
+        step = 1000
         if tokens.shape[0] > step:
             all_outputs = []
 
@@ -118,7 +119,7 @@ class RNNWord2Vec(CharWord2Vec):
                 token_slice = tokens[i:i+step]
                 # create the one-hot char encodings
                 # B*W x L x C
-                char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+                char_encodings, seq_lens = self.chartoken2tensor(token_slice, volatile=volatile)
                 outputs, _ = self._encoder(char_encodings)
                 new_outputs = J.zeros(outputs.size(0), outputs.size(2))
                 # Fill it in
@@ -131,7 +132,7 @@ class RNNWord2Vec(CharWord2Vec):
             return self.linear(torch.cat(all_outputs, dim=0))
 
         else:
-            char_encodings, seq_lens = self.chartoken2tensor(tokens)
+            char_encodings, seq_lens = self.chartoken2tensor(tokens, volatile=volatile)
             outputs, _ = self._encoder(char_encodings)
             new_outputs = J.zeros(outputs.size(0), outputs.size(2))
             # Fill it in
@@ -150,17 +151,17 @@ class PoolRNNWord2Vec(RNNWord2Vec):
                                               num_encoder_layers=num_encoder_layers, linear_size=linear_size,
                                               gru=gru, **kwargs)
 
-    def lookup_tokens(self, tokens):
+    def lookup_tokens(self, tokens, volatile=False):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
-        step = 10000
+        step = 1000
         if tokens.shape[0] > step:
             all_outputs = []
             for i in tqdm(range(0, len(tokens), step)):
                 token_slice = tokens[i:i+step]
                 # create the one-hot char encodings
                 # B*W x L x C
-                char_encodings, seq_lens = self.chartoken2tensor(token_slice)
+                char_encodings, seq_lens = self.chartoken2tensor(token_slice, volatile=volatile)
                 outputs, _ = self._encoder(char_encodings)  # B*W x L x E
                 # print(outputs.size())
                 outputs = torch.max(outputs, dim=1)[0].view(token_slice.shape[0], token_slice.shape[1], self.hidden)
@@ -168,7 +169,7 @@ class PoolRNNWord2Vec(RNNWord2Vec):
             return self.linear(torch.cat(all_outputs, dim=0))
 
         else:
-            char_encodings, seq_lens = self.chartoken2tensor(tokens)
+            char_encodings, seq_lens = self.chartoken2tensor(tokens, volatile=volatile)
             outputs, _ = self._encoder(char_encodings)  # B*W x L x E
             # print(outputs.size())
             outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.hidden)
@@ -197,12 +198,12 @@ class CNNWord2Vec(CharWord2Vec):
         if J.use_cuda:
             self.cuda()
 
-    def lookup_tokens(self, tokens):
+    def lookup_tokens(self, tokens, volatile=False):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
         # create the one-hot char encodings
         # B*W x L x C
-        char_encodings, seq_lens = self.chartoken2tensor(tokens)
+        char_encodings, seq_lens = self.chartoken2tensor(tokens, volatile=volatile)
         outputs = self._encoder(char_encodings.transpose(1, 2)).transpose(1, 2)  # B*W x L x E
         # print(outputs.size())
         outputs = torch.max(outputs, dim=1)[0].view(tokens.shape[0], tokens.shape[1], self.hidden)
