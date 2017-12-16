@@ -53,7 +53,7 @@ parser.add_argument("-t", "--test", type=float, default=float('inf'),
 args = parser.parse_args()
 
 # Get the model factory
-model_func = models.load_model_func(args.model, num_ncoder_layers=args.num_encoder_layers, linear_size=args.linear_size,
+model_func = models.load_model_func(args.model, num_encoder_layers=args.num_encoder_layers, linear_size=args.linear_size,
                                     trainable_char_embeddings=args.trainable_char_embeddings, use_gru=args.use_gru)
 
 # Get corpus
