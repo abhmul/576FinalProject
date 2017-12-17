@@ -11,11 +11,12 @@ class WordVecDict:
 
     def __init__(self):
         self.wv = None
+        self.model = None
 
     def get_dict(self):
-        return self.word_vecs_dict
+        return self.wv
 
-    def make_dict(self, dict_file_name, binary=True):
+    def make_dict(self, dict_file_name, binary=False):
         """
         Because we don't train on a predetermined vocabulary, we need a method for generating a dictionary of words to vectors,
         given some arbitrary vocabulary. 
@@ -26,6 +27,7 @@ class WordVecDict:
         Perhaps let this take vocabulary filename instead?
         """
         self.wv = KeyedVectors.load_word2vec_format(dict_file_name, binary=binary)
+        self.model = None #load model for generating future vocab words
 
     def load_dict(self, dict_file_name):
         """Load the word-vector dictionary from the given pickle file."""
@@ -46,28 +48,39 @@ class WordVecDict:
     def has_words(self, *words):
         """Determine whether all given words are in the dictionary."""
         # print(self.word_vecs_dict.keys()[:5])
+        if not self.has_dict():
+            return False
+
         for word in words:
-            if word not in self.wv:
-                print(word, 'is not in the dictionary')
+            if word not in self.wv.vocab:
+                # print(word, 'is not in the dictionary')
                 return False
         return True
 
     def get_word_vec(self, word):
-        return self.wv[word]
+        if self.has_words(word):
+            return self.wv[word]
+        else:
+            #load vector through network and add it to dictionary
+            return None
 
     def get_relation_vec(self, pair):
         """Given a pair of words, return the vector representing the relation between them."""
         vec1 = self.wv[pair[0]]
         vec2 = self.wv[pair[1]]
-        return vec1 - vec2
+        return vec2 - vec1
 
     def get_d_vec(self, word_a, word_b, word_c):
         """Given A:B::C:?, return the vector representing word D."""
         vec_a = self.wv[word_a]
         vec_b = self.wv[word_b]
         vec_c = self.wv[word_c]
-        vec_d = vec_b - vec_a + vec_c #are there other arithmetic operations to do?
+        vec_d = vec_b - vec_a + vec_c 
         return vec_d
+
+    def get_similar(self, word, topn):
+        print(topn, 'most similar for', word)
+        return self.wv.most_similar(positive=[word], negative=[], topn=topn)
 
     def get_most_similar(self, word_a, word_b, word_c, topn):
         return self.wv.most_similar(positive=[word_c, word_b], negative=[word_a], topn=topn)

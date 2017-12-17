@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 STRING="Running vector exporter..."
-PYTHON="/usr/bin/python3.5"
+PYTHON="/usr/bin/python3.6"
 PROJECT_ROOT="/~/PycharmProjects/576FinalProject/"
 EXPORT_SCRIPT="export.py"
 
