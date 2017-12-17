@@ -18,7 +18,7 @@ parser.add_argument("--filename", required=True, help="File full of vectors")
 args = parser.parse_args()
 
 print('BEGIN')
-eval1 = False # RELSIM dataset
+eval1 = True # RELSIM dataset
 eval2 = True # GOOGLE Analogy dataset
 eval3 = True # MEN word sim dataset
 eval4 = False # TODO SAT Question dataset
@@ -53,6 +53,9 @@ if args.google:
 google = "baseline"
 us = args.filename.split('/')[1]
 
+with open("scores.txt", 'a') as scores:
+	print(args.filename, file=scores)
+
 ##############################################
 ##############################################
 #				EVAL 1						 #
@@ -74,7 +77,9 @@ if eval1:
 	print("Evaluating on RELSIM dataset")
 	print("Total number of relations", len(comp_ratings))
 	print("Evaluating for first", args.num_evals)
-	ev.evaluate_relsim(min(len(comp_ratings), args.num_evals), args.topn, comp_ratings, jdic, us)
+	num_correct = ev.evaluate_relsim(min(len(comp_ratings), args.num_evals), args.topn, comp_ratings, jdic, us)
+	with open("scores.txt", 'a') as scores:
+		print(num_correct, file=scores)
 	if args.google:
 		ev.evaluate_relsim(min(len(comp_ratings), args.num_evals), args.topn, comp_ratings, gdic, google)
 
@@ -125,7 +130,9 @@ if eval2:
 		l = len(section)
 		if cat_names[i] in ['gram1-adjective-to-adverb', 'gram3-comparative', 'gram8-plural', 'gram9-plural-verbs']:
 			print("Evaluating for category", cat_names[i])
-			ev.evaluate(min(l, args.num_evals), args.topn, section, jdic, us)
+			num_correct = ev.evaluate(min(l, args.num_evals), args.topn, section, jdic, us)
+			with open("scores.txt", 'a') as scores:
+				print(num_correct, file=scores)
 			if args.google:
 				ev.evaluate(min(l, args.num_evals), args.topn, section, gdic, google)
 		i += 1
@@ -149,8 +156,13 @@ if eval3:
 	print("Evaluating on MEN Similarity dataset")
 	print("Total number of relations", len(test_sims))
 	print("Evaluating for first", args.num_evals)
-	ev.evaluate_sim(min(args.num_evals, len(test_sims)), test_sims, jdic, us)
+	num_correct = ev.evaluate_sim(min(args.num_evals, len(test_sims)), test_sims, jdic, us)
+	with open("scores.txt", 'a') as scores:
+		print(num_correct, file=scores)
 	if args.google:
 		ev.evaluate_sim(min(args.num_evals, len(test_sims)), test_sims, gdic, google)
 	
-	
+
+
+with open("scores.txt", 'a') as scores:
+	print("\n", file=scores)

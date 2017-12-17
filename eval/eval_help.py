@@ -23,6 +23,7 @@ def evaluate(num_evals, topn, test_set, dic, ntwk_name):
 		print('No analogies evaluated.')
 		return
 	print(ntwk_name, "Correctness: ", num_correct/float(num_evaled)*100, "on", num_evaled)
+	return num_correct/float(num_evaled)*100
 
 def evaluate_relsim(num_evals, topn, comp_ratings, dic, ntwk_name):
 	num_correct = 0
@@ -50,6 +51,7 @@ def evaluate_relsim(num_evals, topn, comp_ratings, dic, ntwk_name):
 	            num_evaled += 1
 	                
 	print(ntwk_name,"Correctness: ", num_correct/float(num_evaled)*100, "on", num_evaled)
+	return num_correct/float(num_evaled)*100
 
 
 def evaluate_sim(num_evals, test_sims, dic, ntwk_name):
@@ -68,4 +70,6 @@ def evaluate_sim(num_evals, test_sims, dic, ntwk_name):
 	        num_evaled += 1
 
 	print(ntwk_name, "Avg Error: ", error/(float(num_evaled)*50))
+	print(ntwk_name, "Correctness: ", 100 * (1 - error / (float(num_evaled) * 50)))
+	return 100 * (1 - error / (float(num_evaled) * 50))
 
