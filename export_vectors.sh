@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 STRING="Running vector exporter..."
-PYTHON="/usr/bin/python3.6"
+PYTHON="/usr/bin/python3.5"
 PROJECT_ROOT="/~/PycharmProjects/576FinalProject/"
 EXPORT_SCRIPT="export.py"
 
@@ -12,8 +12,10 @@ cd ${PROJECT_ROOT}
 echo ${STRING}
 
 # This is for the multilayer lstms
-${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm2_512_char_emb_gensim_decoders -e vectors/text8_lstm_char_emb_gensim_decoders.txt
-${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_pool_lstm2_512_char_emb_gensim_decoders -e vectors/text8_pool_lstm_char_emb_gensim_decoders.txt
+${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm2_512_char_emb_gensim_decoders -e vectors/text8_lstm2_512_char_emb_gensim_decoders.txt
+${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_pool_lstm2_512_char_emb_gensim_decoders -e vectors/text8_pool_lstm2_512_char_emb_gensim_decoders.txt
+${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_cnn2_512_char_emb_gensim_decoders -e vectors/text8_cnn2_512_char_emb_gensim_decoders_vectors.txt
+
 
 # This is for the models with gensim decoders
 #${PYTHON} ${EXPORT_SCRIPT} -m model_files/text8_lstm_char_emb_gensim_decoders -e vectors/text8_lstm_char_emb_gensim_decoders.txt
