@@ -142,7 +142,10 @@ class Word2Vec(object):
         print("Built optimizer:", self._optimizer.__class__.__name__)
 
         # Train the model
-        self.train(self.sentences, save_fname=save_fname)
+        losses = self.train(self.sentences, save_fname=save_fname)
+        if save_fname:
+            with open(save_fname + "_losses.pkl", 'wb') as save_file:
+                pickle.dump(losses, save_file)
 
     @staticmethod
     def build_vocab(sentences, min_count):
@@ -317,6 +320,7 @@ class Word2Vec(object):
 
         # Run each epoch
         num_updates = 0
+        losses = []
         for epoch in range(self.epochs):
             print("Epoch {}/{}".format(epoch+1, self.epochs))
             true_epoch_losses = []
@@ -357,6 +361,8 @@ class Word2Vec(object):
             if save_fname:
                 self.save(save_fname)
                 print("Saved file to", save_fname)
+            losses.append((true_epoch_losses, sampled_epoch_losses))
+        return losses
 
     def train2(self, sentences, save_fname=""):
         # Variables for annealing the learning rate
@@ -454,7 +460,7 @@ class Word2Vec(object):
 
     def export_vectors(self, fname):
         # Lookup all the words
-        embeddings = self._model.lookup_tokens(self.tokens[:, np.newaxis]).data
+        embeddings = self._model.lookup_tokens(self.tokens[:, np.newaxis], volatile=True).data
         if J.use_cuda:
             embeddings = embeddings.cpu()
         embeddings = embeddings.numpy().reshape(self.vocab_size, self.embedding_size)

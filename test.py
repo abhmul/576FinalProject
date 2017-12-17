@@ -40,5 +40,6 @@ def test_save_load():
     assert w2v.vocab_size == w2v2.vocab_size
     assert w2v.vocab == w2v2.vocab
     assert w2v.corpus_length == w2v2.corpus_length
+    assert w2v.char2id == w2v2.char2id
 
 test_save_load()

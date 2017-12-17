@@ -270,3 +270,7 @@ text8
 argparse
 
 *.ipynb
+
+*.npz
+
+model_files/
