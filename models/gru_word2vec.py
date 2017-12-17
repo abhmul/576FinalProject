@@ -79,7 +79,7 @@ class RNNWord2Vec(CharWord2Vec):
     """
 
     def __init__(self, vocab_size, embedding_size, char2id, bidirectional=False, sparse=False,
-                 trainable_char_embeddings=True, num_encoder_layers=1, linear_size=0, gru=False, **kwargs):
+                 trainable_char_embeddings=True, num_encoder_layers=1, linear_size=0, use_gru=False, **kwargs):
         """
         Initializes a pytorch word2vec module.
 
@@ -95,7 +95,7 @@ class RNNWord2Vec(CharWord2Vec):
         self.bidirectional = bidirectional
         self.hidden = embedding_size if linear_size == 0 else linear_size
         self.num_recurrent_layers = num_encoder_layers
-        rnn_constructor = nn.GRU if gru else nn.LSTM
+        rnn_constructor = nn.GRU if use_gru else nn.LSTM
         print("Using", num_encoder_layers, "layer", self.hidden, "neuron", rnn_constructor.__name__, "as encoder")
         self._encoder = rnn_constructor(self.num_chars, self.hidden // 2 if bidirectional else self.hidden,
                                         num_encoder_layers, batch_first=True, bidirectional=self.bidirectional)
@@ -145,11 +145,11 @@ class RNNWord2Vec(CharWord2Vec):
 class PoolRNNWord2Vec(RNNWord2Vec):
 
     def __init__(self, vocab_size, embedding_size, char2id, bidirectional=True, sparse=False,
-                 trainable_char_embeddings=False, num_encoder_layers=1, linear_size=0, gru=False, **kwargs):
+                 trainable_char_embeddings=False, num_encoder_layers=1, linear_size=0, use_gru=False, **kwargs):
         super(PoolRNNWord2Vec, self).__init__(vocab_size, embedding_size, char2id, bidirectional, sparse=sparse,
                                               trainable_char_embeddings=trainable_char_embeddings,
                                               num_encoder_layers=num_encoder_layers, linear_size=linear_size,
-                                              gru=gru, **kwargs)
+                                              use_gru=use_gru, **kwargs)
 
     def lookup_tokens(self, tokens, volatile=False):
         # Shape of tokens is B x W
