@@ -207,6 +207,10 @@ class CNNWord2Vec(CharWord2Vec):
     def lookup_tokens(self, tokens, volatile=False):
         # Shape of tokens is B x W
         tokens = np.array(tokens)
+        step = 1000
+        if tokens.shape[0] > step:
+            all_outputs = [self.lookup_tokens(tokens[i:i+step], volatile=volatile) for i in tqdm(range(0, len(tokens), step))]
+            return torch.cat(all_outputs, dim=0)
         # create the one-hot char encodings
         # B*W x L x C
         char_encodings, seq_lens = self.chartoken2tensor(tokens, volatile=volatile)
